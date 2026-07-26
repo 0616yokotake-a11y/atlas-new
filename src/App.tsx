@@ -1125,6 +1125,25 @@ function App() {
     return filteredExercises.slice(0, 4)
   }, [filteredExercises])
 
+  const weeklyBodyPartFrequency = useMemo(() => {
+    const today = dayjs().startOf('day')
+    const frequencyMap = new Map<BodyPart, number>()
+    BODY_PARTS.forEach((part) => {
+      frequencyMap.set(part, 0)
+    })
+
+    sessions.forEach((session) => {
+      const sessionDay = dayjs(session.date).startOf('day')
+      const dayDiff = today.diff(sessionDay, 'day')
+      if (dayDiff < 0 || dayDiff >= 7) return
+
+      const current = frequencyMap.get(session.bodyPart) ?? 0
+      frequencyMap.set(session.bodyPart, current + 1)
+    })
+
+    return frequencyMap
+  }, [sessions])
+
   const selectedExerciseProfile = useMemo(() => getExerciseInputProfile(selectedExercise), [selectedExercise])
 
   const selectedExerciseInfo = useMemo(() => {
@@ -1542,9 +1561,11 @@ function App() {
                     onClick={() => {
                       setSelectedBodyPart(part)
                       setWorkoutPhase('exercise')
+                      navigator.vibrate?.(30)
                     }}
                   >
-                    {part}
+                    <span>{part}</span>
+                    <small className="freq-badge">{weeklyBodyPartFrequency.get(part) ?? 0}x</small>
                   </button>
                 ))}
               </div>
@@ -1575,12 +1596,15 @@ function App() {
                   <div key={exercise} className={`exercise-item ${selectedExercise === exercise ? 'selected' : ''}`}>
                     <button
                       type="button"
-                      onClick={() => handleExerciseSelect(exercise)}
+                      onClick={() => {
+                        handleExerciseSelect(exercise)
+                        navigator.vibrate?.(20)
+                      }}
                     >
                       <span>{exercise}</span>
-                      <small>
+                      <small className="previous-record">
                         {exerciseUsageStats.get(exercise)?.latestSetLine
-                          ? `前回 ${exerciseUsageStats.get(exercise)?.latestSetLine}`
+                          ? `${exerciseUsageStats.get(exercise)?.latestSetLine}`
                           : '前回記録なし'}
                       </small>
                     </button>
@@ -1634,7 +1658,10 @@ function App() {
                   type="button"
                   className={isCompleteArmed ? 'holding' : ''}
                   disabled={isSavingWorkout}
-                  onClick={handleCompleteAction}
+                  onClick={() => {
+                    navigator.vibrate?.(50)
+                    handleCompleteAction()
+                  }}
                 >
                   {isSavingWorkout ? '保存中...' : isCompleteArmed ? '保存する' : '完了'}
                 </button>

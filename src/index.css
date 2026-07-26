@@ -512,6 +512,25 @@ button:disabled {
 .body-map-full button {
   min-height: clamp(62px, 12vh, 94px);
   font-size: 1.06rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+}
+
+.body-map-full button span {
+  display: block;
+}
+
+.body-map-full button .freq-badge {
+  display: block;
+  font-size: 0.68rem;
+  color: #7dd3fc;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
 }
 
 .exercise-list {
@@ -573,6 +592,14 @@ button:disabled {
   color: #93c5fd;
   font-size: 0.72rem;
   font-weight: 500;
+}
+
+.exercise-item button:first-child .previous-record {
+  color: #38bdf8;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  opacity: 0.95;
 }
 
 .exercise-item.selected button:first-child {
