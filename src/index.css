@@ -46,9 +46,13 @@ body {
   padding: 4px 4px 0;
 }
 
+.app.has-fixed-nav {
+  padding-bottom: calc(108px + env(safe-area-inset-bottom));
+}
+
 .app.no-scroll {
   overflow-y: hidden;
-  padding: 0;
+  padding: 0 0 calc(108px + env(safe-area-inset-bottom));
   gap: 0;
 }
 
@@ -340,6 +344,28 @@ button:disabled {
 .menu-item {
   border-top: 1px solid rgba(148, 163, 184, 0.18);
   padding-top: 10px;
+}
+
+.history-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-delete-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.78rem;
+  background: rgba(30, 41, 59, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  box-shadow: none;
+}
+
+.history-delete-btn.danger {
+  background: rgba(220, 38, 38, 0.2);
+  border-color: rgba(252, 165, 165, 0.4);
+  color: #fee2e2;
 }
 
 .history-item p,
@@ -1016,10 +1042,11 @@ button.holding {
 }
 
 .bottom-nav {
-  position: sticky;
+  position: fixed;
   bottom: 0;
-  width: 100%;
-  margin-top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 100%);
   background: rgba(2, 6, 23, 0.84);
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-bottom: none;
@@ -1030,6 +1057,7 @@ button.holding {
   grid-template-columns: repeat(5, 1fr);
   gap: 7px;
   padding: 9px 9px calc(9px + env(safe-area-inset-bottom));
+  z-index: 95;
 }
 
 .thumb-workout-cta {

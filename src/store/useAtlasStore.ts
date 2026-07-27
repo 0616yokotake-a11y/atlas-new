@@ -8,6 +8,7 @@ type AtlasStore = {
   setSessions: (sessions: WorkoutSession[]) => void
   setMyMenus: (myMenus: MyMenu[]) => void
   addSession: (session: WorkoutSession) => void
+  deleteSession: (sessionId: string) => void
   addMyMenu: (name: string, bodyPart: BodyPart, exercises: string[]) => MyMenu
   updateMyMenu: (menuId: string, name: string, bodyPart: BodyPart, exercises: string[]) => void
   deleteMyMenu: (menuId: string) => void
@@ -29,6 +30,10 @@ export const useAtlasStore = create<AtlasStore>()(
       setSessions: (sessions) => set({ sessions }),
       setMyMenus: (myMenus) => set({ myMenus }),
       addSession: (session) => set((state) => ({ sessions: [session, ...state.sessions] })),
+      deleteSession: (sessionId) =>
+        set((state) => ({
+          sessions: state.sessions.filter((session) => session.id !== sessionId),
+        })),
       addMyMenu: (name, bodyPart, exercises) => {
         const created = { id: makeId(), name, bodyPart, exercises }
         set((state) => ({

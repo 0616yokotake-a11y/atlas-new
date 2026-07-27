@@ -43,6 +43,10 @@ export async function saveSession(db: Firestore, uid: string, session: WorkoutSe
   await setDoc(doc(db, 'users', uid, 'sessions', session.id), session)
 }
 
+export async function removeSession(db: Firestore, uid: string, sessionId: string) {
+  await deleteDoc(doc(db, 'users', uid, 'sessions', sessionId))
+}
+
 export async function saveMyMenu(db: Firestore, uid: string, myMenu: MyMenu) {
   await setDoc(doc(db, 'users', uid, 'myMenus', myMenu.id), myMenu)
 }

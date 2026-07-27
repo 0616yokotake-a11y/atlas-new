@@ -16,7 +16,7 @@ import dayjs from 'dayjs'
 import { auth, db, isFirebaseConfigured } from './lib/firebase'
 import { BODY_PARTS, EXERCISES_BY_BODY_PART } from './data/catalog'
 import { useAtlasStore } from './store/useAtlasStore'
-import { saveSession, subscribeSessions } from './lib/firestoreSync'
+import { removeSession, saveSession, subscribeSessions } from './lib/firestoreSync'
 import { requestAiFeedback } from './lib/aiFeedback'
 import type { BodyPart, ExerciseSet, WorkoutSession } from './types'
 
@@ -901,7 +901,7 @@ function AuthView({
 }
 
 function App() {
-  const { sessions, setSessions, addSession } = useAtlasStore()
+  const { sessions, setSessions, addSession, deleteSession: deleteSessionFromStore } = useAtlasStore()
   const [tab, setTab] = useState<AppTab>('home')
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
@@ -913,6 +913,8 @@ function App() {
   const [restSeconds, setRestSeconds] = useState(90)
   const [timerRunning, setTimerRunning] = useState(false)
   const [historyQuery, setHistoryQuery] = useState('')
+  const [historyDeleteTargetId, setHistoryDeleteTargetId] = useState<string | null>(null)
+  const [isDeletingHistory, setIsDeletingHistory] = useState(false)
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
@@ -986,6 +988,12 @@ function App() {
   useEffect(() => {
     if (tab !== 'workout') {
       resetCompleteConfirm()
+    }
+  }, [tab])
+
+  useEffect(() => {
+    if (tab !== 'history') {
+      setHistoryDeleteTargetId(null)
     }
   }, [tab])
 
@@ -1664,6 +1672,33 @@ function App() {
     resetCompleteConfirm()
   }
 
+  async function handleDeleteHistorySession(sessionId: string) {
+    if (isDeletingHistory) {
+      return
+    }
+
+    setIsDeletingHistory(true)
+    try {
+      if (db && user && !isDemoMode) {
+        await removeSession(db, user.uid, sessionId)
+        setSyncStatus('クラウド同期済み')
+      } else {
+        deleteSessionFromStore(sessionId)
+        setSyncStatus('ローカル保存')
+      }
+
+      setHistoryDeleteTargetId(null)
+      showToast('履歴を削除しました')
+      setAuthError(null)
+    } catch (error) {
+      setSyncStatus('同期エラー')
+      setAuthError(error instanceof Error ? error.message : '履歴削除に失敗しました。')
+      showToast('履歴削除に失敗しました', 'error')
+    } finally {
+      setIsDeletingHistory(false)
+    }
+  }
+
   async function saveWorkout() {
     if (isSavingWorkout) {
       return
@@ -1767,7 +1802,7 @@ function App() {
   }
 
   return (
-    <main className={`app ${tab === 'home' ? 'home-single-screen' : ''} ${tab === 'workout' ? 'no-scroll' : ''}`}>
+    <main className={`app has-fixed-nav ${tab === 'home' ? 'home-single-screen' : ''} ${tab === 'workout' ? 'no-scroll' : ''}`}>
       <header className="header">
         <h1 className="brand-title">Atlas</h1>
         <div className="header-meta">
@@ -2082,9 +2117,26 @@ function App() {
           />
           {groupedHistory.map((session) => (
             <article key={session.id} className="history-item">
-              <strong>
-                {dayjs(session.date).format('YYYY/MM/DD')} - {session.bodyPart}
-              </strong>
+              <div className="history-item-head">
+                <strong>
+                  {dayjs(session.date).format('YYYY/MM/DD')} - {session.bodyPart}
+                </strong>
+                <button
+                  type="button"
+                  className={`history-delete-btn ${historyDeleteTargetId === session.id ? 'danger' : ''}`}
+                  disabled={isDeletingHistory}
+                  onClick={() => {
+                    if (historyDeleteTargetId === session.id) {
+                      void handleDeleteHistorySession(session.id)
+                      return
+                    }
+
+                    setHistoryDeleteTargetId(session.id)
+                  }}
+                >
+                  {historyDeleteTargetId === session.id ? '削除する' : '削除'}
+                </button>
+              </div>
               {session.exercises.map((exercise) => (
                 <p key={exercise.id}>
                   {exercise.name}:{' '}
