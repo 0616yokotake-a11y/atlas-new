@@ -1197,6 +1197,90 @@ button.holding {
   color: #cbd5e1;
 }
 
+.home-last-workout-card h2 {
+  font-size: 0.92rem;
+  color: #cbd5e1;
+}
+
+.home-last-workout-meta {
+  margin: 2px 0 8px;
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.home-last-workout-kpi {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.home-last-workout-kpi p {
+  margin: 0;
+  padding: 6px 7px;
+  border-radius: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  background: rgba(30, 41, 59, 0.45);
+  display: grid;
+  gap: 2px;
+}
+
+.home-last-workout-kpi span {
+  color: #93c5fd;
+  font-size: 0.68rem;
+}
+
+.home-last-workout-kpi strong {
+  color: #eff6ff;
+  font-size: 0.88rem;
+  line-height: 1.2;
+}
+
+.home-last-workout-lines {
+  margin-top: 8px;
+  display: grid;
+  gap: 5px;
+}
+
+.home-last-workout-lines p {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.48);
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.home-last-workout-lines span {
+  color: #dbeafe;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-last-workout-lines strong {
+  color: #f8fafc;
+  font-size: 0.82rem;
+}
+
+.home-last-workout-lines small {
+  color: #94a3b8;
+  font-size: 0.72rem;
+}
+
+.home-last-workout-more {
+  color: #93c5fd;
+  font-size: 0.74rem;
+}
+
+.home-last-workout-empty {
+  margin: 6px 0 0;
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
 .home-graph-card {
   display: grid;
   grid-template-rows: auto 1fr auto;

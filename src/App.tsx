@@ -1424,6 +1424,46 @@ function App() {
     return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw
   }, [aiFeedback, sessions, weeklyCalories.total])
 
+  const latestSessionSummary = useMemo(() => {
+    if (sessions.length === 0) {
+      return null
+    }
+
+    const latest = [...sessions].sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())[0]
+    const totalSets = latest.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0)
+    const totalVolume = latest.exercises
+      .flatMap((exercise) => exercise.sets)
+      .reduce((sum, set) => sum + set.weight * set.reps, 0)
+    const restDays = dayjs().diff(dayjs(latest.date), 'day')
+    const highlights = latest.exercises.slice(0, 3).map((exercise) => {
+      const bestSet = exercise.sets.reduce((best, current) => {
+        if (current.weight > best.weight) {
+          return current
+        }
+        if (current.weight === best.weight && current.reps > best.reps) {
+          return current
+        }
+        return best
+      }, exercise.sets[0])
+      return {
+        name: exercise.name,
+        bestSetLabel: `${bestSet.weight}×${bestSet.reps}`,
+        setCount: exercise.sets.length,
+      }
+    })
+
+    return {
+      dateLabel: dayjs(latest.date).format('M/D'),
+      bodyPart: latest.bodyPart,
+      restDaysLabel: restDays === 0 ? '今日実施' : `${restDays}日前`,
+      exerciseCount: latest.exercises.length,
+      totalSets,
+      totalVolume,
+      highlights,
+      remainingExerciseCount: Math.max(0, latest.exercises.length - highlights.length),
+    }
+  }, [sessions])
+
   const streakDays = useMemo(() => {
     if (sessions.length === 0) {
       return 0
@@ -2005,6 +2045,48 @@ function App() {
             <p className="home-ai-main" title={homeAiMessage}>
               {homeAiMessage}
             </p>
+          </section>
+
+          <section className="card home-last-workout-card">
+            <div className="row">
+              <h2>前回トレーニング</h2>
+              {latestSessionSummary && <span className="badge">{latestSessionSummary.restDaysLabel}</span>}
+            </div>
+            {latestSessionSummary ? (
+              <>
+                <p className="home-last-workout-meta">
+                  {latestSessionSummary.dateLabel} / {latestSessionSummary.bodyPart}
+                </p>
+                <div className="home-last-workout-kpi">
+                  <p>
+                    <span>種目</span>
+                    <strong>{latestSessionSummary.exerciseCount}</strong>
+                  </p>
+                  <p>
+                    <span>セット</span>
+                    <strong>{latestSessionSummary.totalSets}</strong>
+                  </p>
+                  <p>
+                    <span>総重量</span>
+                    <strong>{latestSessionSummary.totalVolume.toLocaleString()}kg</strong>
+                  </p>
+                </div>
+                <div className="home-last-workout-lines">
+                  {latestSessionSummary.highlights.map((item) => (
+                    <p key={item.name}>
+                      <span>{item.name}</span>
+                      <strong>{item.bestSetLabel}</strong>
+                      <small>{item.setCount}set</small>
+                    </p>
+                  ))}
+                  {latestSessionSummary.remainingExerciseCount > 0 && (
+                    <p className="home-last-workout-more">ほか {latestSessionSummary.remainingExerciseCount} 種目</p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="home-last-workout-empty">履歴が増えると前回内容をここに表示します。</p>
+            )}
           </section>
 
           <section className="card home-graph-card">
