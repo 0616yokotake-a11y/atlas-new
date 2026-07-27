@@ -34,12 +34,17 @@ textarea {
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   min-height: 100svh;
   overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: none;
+  overflow-y: hidden;
   background:
     radial-gradient(1000px 400px at 10% -10%, rgba(34, 211, 238, 0.25), transparent 60%),
     radial-gradient(1000px 400px at 90% -20%, rgba(167, 139, 250, 0.28), transparent 60%),
