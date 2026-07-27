@@ -3056,6 +3056,13 @@ function App() {
         </button>
         <button
           type="button"
+          onClick={() => vibrateAndSetTab('analytics', 10)}
+          className={`analytics-cta ${tab === 'analytics' ? 'active' : ''}`}
+        >
+          分析
+        </button>
+        <button
+          type="button"
           onClick={() => startWorkoutFlow(false)}
           className={tab === 'workout' ? 'active' : ''}
         >
@@ -3067,13 +3074,6 @@ function App() {
           className={tab === 'history' ? 'active' : ''}
         >
           履歴
-        </button>
-        <button
-          type="button"
-          onClick={() => vibrateAndSetTab('analytics', 10)}
-          className={tab === 'analytics' ? 'active' : ''}
-        >
-          分析
         </button>
       </nav>
     </main>
