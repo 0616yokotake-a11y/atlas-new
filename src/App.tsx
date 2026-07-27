@@ -2239,6 +2239,14 @@ function App() {
           <p className="header-email">{user?.email ?? 'デモモード'}</p>
           <p className="sync-badge">{syncStatus}</p>
         </div>
+        <button
+          type="button"
+          className={`top-settings-btn ${tab === 'settings' ? 'active' : ''}`}
+          onClick={() => vibrateAndSetTab('settings', 18)}
+          aria-label="設定を開く"
+        >
+          ⚙
+        </button>
       </header>
       {authError && <p className="error">{authError}</p>}
 
