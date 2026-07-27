@@ -303,6 +303,12 @@ button:active {
   button:hover {
     transform: none;
   }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 button:disabled {
