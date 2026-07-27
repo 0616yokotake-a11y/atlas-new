@@ -1960,21 +1960,25 @@ function App() {
       setAuthError(null)
       showToast('保存しました')
       resetCompleteConfirm()
+      setIsSavingWorkout(false)
 
       if (db && user && !isDemoMode) {
+        const dbRef = db
+        const uid = user.uid
         setSyncStatus('クラウド同期中...')
-        try {
-          await saveSession(db, user.uid, session)
-          setSyncStatus('クラウド同期済み')
-        } catch (error) {
-          setSyncStatus('同期エラー')
-          setAuthError(
-            error instanceof Error
-              ? `同期に失敗しました。記録は端末に保存済みです。${error.message}`
-              : '同期に失敗しました。記録は端末に保存済みです。',
-          )
-          showToast('端末には保存済み / 同期エラー', 'error')
-        }
+        void saveSession(dbRef, uid, session)
+          .then(() => {
+            setSyncStatus('クラウド同期済み')
+          })
+          .catch((error) => {
+            setSyncStatus('同期エラー')
+            setAuthError(
+              error instanceof Error
+                ? `同期に失敗しました。記録は端末に保存済みです。${error.message}`
+                : '同期に失敗しました。記録は端末に保存済みです。',
+            )
+            showToast('端末には保存済み / 同期エラー', 'error')
+          })
       } else {
         setSyncStatus('ローカル保存')
       }
@@ -1983,7 +1987,6 @@ function App() {
       setAuthError(error instanceof Error ? error.message : 'ワークアウト保存に失敗しました。')
       showToast('保存に失敗しました', 'error')
       resetCompleteConfirm()
-    } finally {
       setIsSavingWorkout(false)
     }
   }
@@ -2170,6 +2173,7 @@ function App() {
             {workoutPhase !== 'body' ? (
               <button
                 type="button"
+                className="secondary-btn"
                 onClick={() => {
                   triggerHaptic(12)
                   setWorkoutPhase((previous) => (previous === 'record' ? 'exercise' : 'body'))
@@ -2178,7 +2182,7 @@ function App() {
                 戻る
               </button>
             ) : (
-              <button type="button" onClick={() => vibrateAndSetTab('home', 12)}>
+              <button type="button" className="secondary-btn" onClick={() => vibrateAndSetTab('home', 12)}>
                 ホーム
               </button>
             )}

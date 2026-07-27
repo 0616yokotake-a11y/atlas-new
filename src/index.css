@@ -295,6 +295,13 @@ button:disabled {
   transform: none;
 }
 
+button.secondary-btn {
+  background: rgba(30, 41, 59, 0.82);
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  box-shadow: none;
+  color: #dbeafe;
+}
+
 .auth-tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -790,7 +797,7 @@ button:disabled {
 
 .home-grid {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto;
   align-content: start;
   gap: 6px;
   flex: 1;
@@ -819,6 +826,7 @@ button:disabled {
   height: 100%;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   flex: 1;
   border-radius: 0;
   padding: 8px 8px 6px;
@@ -850,6 +858,7 @@ button:disabled {
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   flex: 1;
 }
 
@@ -951,6 +960,12 @@ button:disabled {
   gap: 6px;
   overflow-x: auto;
   padding-bottom: 2px;
+}
+
+.exercise-step .chip-row {
+  overflow-x: visible;
+  flex-wrap: wrap;
+  padding-bottom: 0;
 }
 
 .chip-row::-webkit-scrollbar {
