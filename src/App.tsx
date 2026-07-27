@@ -925,6 +925,7 @@ function App() {
   const [isCompleteArmed, setIsCompleteArmed] = useState(false)
   const [isSavingWorkout, setIsSavingWorkout] = useState(false)
   const [showSavedToast, setShowSavedToast] = useState(false)
+  const [isLandscapeBlocked, setIsLandscapeBlocked] = useState(false)
   const [exerciseSetDrafts, setExerciseSetDrafts] = useState<
     Record<string, Array<Pick<ExerciseSet, 'weight' | 'reps'>>>
   >({})
@@ -984,6 +985,12 @@ function App() {
   }, [workoutPhase])
 
   useEffect(() => {
+    if (tab !== 'workout') {
+      resetCompleteConfirm()
+    }
+  }, [tab])
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return
     }
@@ -1013,6 +1020,30 @@ function App() {
       if (wheelScrollTimerRef.current) {
         window.clearTimeout(wheelScrollTimerRef.current)
       }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const mediaQuery = window.matchMedia('(orientation: landscape) and (max-width: 1024px)')
+    const updateOrientationBlock = () => {
+      setIsLandscapeBlocked(mediaQuery.matches)
+    }
+
+    updateOrientationBlock()
+    if (typeof screen !== 'undefined' && 'orientation' in screen && typeof screen.orientation.lock === 'function') {
+      void screen.orientation.lock('portrait').catch(() => undefined)
+    }
+
+    mediaQuery.addEventListener('change', updateOrientationBlock)
+    window.addEventListener('resize', updateOrientationBlock)
+
+    return () => {
+      mediaQuery.removeEventListener('change', updateOrientationBlock)
+      window.removeEventListener('resize', updateOrientationBlock)
     }
   }, [])
 
@@ -1544,6 +1575,7 @@ function App() {
     const nextValue = getNearestOption(getPickerOptionsForExercise(selectedExercise, key), currentValue)
     pickerOpenValueRef.current = nextValue
     lastWheelHapticValueRef.current = nextValue
+    resetCompleteConfirm()
     setPickerTarget({ setId, key })
     setPickerValue(nextValue)
   }
@@ -1698,6 +1730,17 @@ function App() {
 
   if (loading) {
     return <main className="loading">読み込み中...</main>
+  }
+
+  if (isLandscapeBlocked) {
+    return (
+      <main className="orientation-guard">
+        <div className="orientation-guard-card">
+          <h1>縦画面で使ってください</h1>
+          <p>Atlas はスマホ縦持ち専用です。端末を縦に戻すと、そのまま続きから再開できます。</p>
+        </div>
+      </main>
+    )
   }
 
   if (!canUseApp) {
@@ -1955,20 +1998,8 @@ function App() {
                 >
                   {isSavingWorkout ? '保存中...' : isCompleteArmed ? '保存する' : '完了'}
                 </button>
-                {isCompleteArmed && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic(12)
-                      resetCompleteConfirm()
-                    }}
-                    disabled={isSavingWorkout}
-                  >
-                    編集に戻る
-                  </button>
-                )}
               </div>
-              {isCompleteArmed && <p className="complete-confirm-copy">この内容で保存して部位選択へ戻ります。</p>}
+              {isCompleteArmed && <p className="complete-confirm-copy">もう一度タップで保存。重量・回数を触ると確認は解除されます。</p>}
               <div className="timer">
                 <h3>休憩タイマー</h3>
                 <div className="timer-adjust">
@@ -2002,6 +2033,7 @@ function App() {
                     type="button"
                     onClick={() => {
                       triggerHaptic(timerRunning ? 14 : 20)
+                      resetCompleteConfirm()
                       setTimerRunning((previous) => {
                         if (!previous && restSeconds === 0) {
                           setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
@@ -2016,6 +2048,7 @@ function App() {
                     type="button"
                     onClick={() => {
                       triggerHaptic(12)
+                      resetCompleteConfirm()
                       setTimerRunning(false)
                       setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
                     }}

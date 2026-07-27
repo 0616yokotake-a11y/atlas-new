@@ -849,12 +849,12 @@ button:disabled {
 }
 
 .complete-action-row.is-confirming button {
-  flex-basis: calc((100% - 8px) / 2);
+  flex-basis: 100%;
 }
 
 .complete-confirm-copy {
-  margin: -2px 2px 0;
-  color: #cbd5e1;
+  margin: -2px 4px 0;
+  color: #94a3b8;
   font-size: 0.78rem;
   line-height: 1.4;
 }
@@ -977,6 +977,40 @@ button.holding {
   color: #93c5fd;
   font-size: 0.7rem;
   white-space: nowrap;
+}
+
+.orientation-guard {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background:
+    radial-gradient(1000px 400px at 10% -10%, rgba(34, 211, 238, 0.25), transparent 60%),
+    radial-gradient(1000px 400px at 90% -20%, rgba(167, 139, 250, 0.28), transparent 60%),
+    linear-gradient(180deg, #020617 0%, #020617 100%);
+}
+
+.orientation-guard-card {
+  width: min(420px, 100%);
+  padding: 20px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.76));
+  box-shadow:
+    0 12px 28px rgba(2, 6, 23, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  text-align: center;
+}
+
+.orientation-guard-card h1 {
+  margin: 0 0 10px;
+  font-size: 1.45rem;
+}
+
+.orientation-guard-card p {
+  margin: 0;
+  color: #cbd5e1;
+  line-height: 1.6;
 }
 
 .kpi-chip strong {
