@@ -922,9 +922,8 @@ function App() {
   const [exerciseInfoTarget, setExerciseInfoTarget] = useState<string | null>(null)
   const [pickerTarget, setPickerTarget] = useState<{ setId: string; key: 'weight' | 'reps' } | null>(null)
   const [pickerValue, setPickerValue] = useState(0)
-  const [isCompleteArmed, setIsCompleteArmed] = useState(false)
   const [isSavingWorkout, setIsSavingWorkout] = useState(false)
-  const [showSavedToast, setShowSavedToast] = useState(false)
+  const [toastState, setToastState] = useState<{ message: string; tone: 'default' | 'error' } | null>(null)
   const [isLandscapeBlocked, setIsLandscapeBlocked] = useState(false)
   const [exerciseSetDrafts, setExerciseSetDrafts] = useState<
     Record<string, Array<Pick<ExerciseSet, 'weight' | 'reps'>>>
@@ -1629,7 +1628,7 @@ function App() {
   }
 
   function resetCompleteConfirm() {
-    setIsCompleteArmed(false)
+    return
   }
 
   function handleCompleteAction() {
@@ -1637,12 +1636,18 @@ function App() {
       return
     }
 
-    if (isCompleteArmed) {
-      void saveWorkout()
-      return
-    }
+    void saveWorkout()
+  }
 
-    setIsCompleteArmed(true)
+  function showToast(message: string, tone: 'default' | 'error' = 'default') {
+    setToastState({ message, tone })
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current)
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastState(null)
+      toastTimerRef.current = null
+    }, 2200)
   }
 
   function startWorkoutFlow(forceReset = false) {
@@ -1668,30 +1673,36 @@ function App() {
     try {
       const session = createSession(selectedBodyPart, selectedExercise, sets)
       addSession(session)
-
-      if (db && user && !isDemoMode) {
-        await saveSession(db, user.uid, session)
-        setSyncStatus('クラウド同期済み')
-      }
-
       setTab('workout')
       setWorkoutPhase('body')
       setSets(createDefaultSetsForExercise(selectedExercise))
       setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
       setTimerRunning(false)
       setAuthError(null)
-      setShowSavedToast(true)
-      if (toastTimerRef.current) {
-        window.clearTimeout(toastTimerRef.current)
-      }
-      toastTimerRef.current = window.setTimeout(() => {
-        setShowSavedToast(false)
-        toastTimerRef.current = null
-      }, 1800)
+      showToast('保存しました')
       resetCompleteConfirm()
+
+      if (db && user && !isDemoMode) {
+        setSyncStatus('クラウド同期中...')
+        try {
+          await saveSession(db, user.uid, session)
+          setSyncStatus('クラウド同期済み')
+        } catch (error) {
+          setSyncStatus('同期エラー')
+          setAuthError(
+            error instanceof Error
+              ? `同期に失敗しました。記録は端末に保存済みです。${error.message}`
+              : '同期に失敗しました。記録は端末に保存済みです。',
+          )
+          showToast('端末には保存済み / 同期エラー', 'error')
+        }
+      } else {
+        setSyncStatus('ローカル保存')
+      }
     } catch (error) {
       setSyncStatus('同期エラー')
       setAuthError(error instanceof Error ? error.message : 'ワークアウト保存に失敗しました。')
+      showToast('保存に失敗しました', 'error')
       resetCompleteConfirm()
     } finally {
       setIsSavingWorkout(false)
@@ -1764,6 +1775,7 @@ function App() {
           <p className="sync-badge">{syncStatus}</p>
         </div>
       </header>
+      {authError && <p className="error">{authError}</p>}
 
       {tab === 'home' && (
         <section className="home-grid">
@@ -1986,20 +1998,18 @@ function App() {
                   ＋セット追加
                 </button>
               </div>
-              <div className={`action-row complete-action-row ${isCompleteArmed ? 'is-confirming' : ''}`}>
+              <div className="action-row complete-action-row">
                 <button
                   type="button"
-                  className={isCompleteArmed ? 'holding' : ''}
                   disabled={isSavingWorkout}
                   onClick={() => {
                     triggerHaptic(50)
                     handleCompleteAction()
                   }}
                 >
-                  {isSavingWorkout ? '保存中...' : isCompleteArmed ? '保存する' : '完了'}
+                  {isSavingWorkout ? '保存中...' : '保存して終了'}
                 </button>
               </div>
-              {isCompleteArmed && <p className="complete-confirm-copy">もう一度タップで保存。重量・回数を触ると確認は解除されます。</p>}
               <div className="timer">
                 <h3>休憩タイマー</h3>
                 <div className="timer-adjust">
@@ -2238,7 +2248,7 @@ function App() {
         </div>
       )}
 
-      {showSavedToast && <div className="toast">保存しました</div>}
+      {toastState && <div className={`toast ${toastState.tone === 'error' ? 'toast-error' : ''}`}>{toastState.message}</div>}
 
       <nav className="bottom-nav">
         <button type="button" onClick={() => vibrateAndSetTab('home', 10)} className={tab === 'home' ? 'active' : ''}>
