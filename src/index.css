@@ -798,8 +798,10 @@ button.secondary-btn {
 .home-ai-main {
   margin: 0;
   color: #eff6ff;
-  font-size: 0.9rem;
-  line-height: 1.45;
+  font-size: 0.96rem;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+  line-height: 1.5;
   min-height: 0;
   padding: 7px 8px;
   border-radius: 10px;

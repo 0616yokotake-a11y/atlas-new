@@ -1017,6 +1017,7 @@ function App() {
   const lastWheelHapticValueRef = useRef<number | null>(null)
   const pickerOpenValueRef = useRef(0)
   const toastTimerRef = useRef<number | null>(null)
+  const previousStreakDaysRef = useRef<number | null>(null)
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
   const previousMainTabRef = useRef<MainTab>('home')
   const [phoneConfirmation, setPhoneConfirmation] = useState<ConfirmationResult | null>(null)
@@ -1447,35 +1448,6 @@ function App() {
     return `${rounded >= 0 ? '+' : ''}${rounded}%`
   }, [previousWeeklyTotalVolume, weeklyTotalVolume])
 
-  const weeklyIntensityTrendLabel = useMemo(() => {
-    const now = dayjs()
-    const buildAverage = (minDayDiff: number, maxDayDiff: number) => {
-      const targetSets = sessions
-        .filter((session) => {
-          const diff = now.diff(dayjs(session.date), 'day')
-          return diff >= minDayDiff && diff < maxDayDiff
-        })
-        .flatMap((session) => session.exercises)
-        .flatMap((exercise) => exercise.sets)
-
-      if (targetSets.length === 0) {
-        return 0
-      }
-
-      const sum = targetSets.reduce((total, set) => total + set.weight * set.reps, 0)
-      return sum / targetSets.length
-    }
-
-    const currentAverage = buildAverage(0, 7)
-    const previousAverage = buildAverage(7, 14)
-    if (previousAverage === 0) {
-      return currentAverage > 0 ? 'NEW' : '0%'
-    }
-    const delta = ((currentAverage - previousAverage) / previousAverage) * 100
-    const rounded = Math.round(delta)
-    return `${rounded >= 0 ? '+' : ''}${rounded}%`
-  }, [sessions])
-
   const streakDays = useMemo(() => {
     if (sessions.length === 0) {
       return 0
@@ -1496,22 +1468,20 @@ function App() {
     return streak
   }, [sessions])
 
-  const bodyBalanceIndex = useMemo(() => {
-    const now = dayjs()
-    const counts = BODY_PARTS.map(
-      (part) =>
-        sessions.filter((session) => session.bodyPart === part && now.diff(dayjs(session.date), 'day') < 7).length,
-    )
-    const total = counts.reduce((sum, count) => sum + count, 0)
-    if (total === 0) {
-      return 0
+  useEffect(() => {
+    const previous = previousStreakDaysRef.current
+    if (previous === null) {
+      previousStreakDaysRef.current = streakDays
+      return
     }
 
-    const probabilities = counts.filter((count) => count > 0).map((count) => count / total)
-    const entropy = probabilities.reduce((sum, p) => sum - p * Math.log(p), 0)
-    const maxEntropy = Math.log(BODY_PARTS.length)
-    return Math.round((entropy / maxEntropy) * 100)
-  }, [sessions])
+    if (streakDays > previous) {
+      showToast(`連続${streakDays}日達成 🔥`)
+      triggerHaptic([18, 30, 18])
+    }
+
+    previousStreakDaysRef.current = streakDays
+  }, [streakDays])
 
   const weeklyCalories = useMemo(() => {
     const dayLabels = ['日', '月', '火', '水', '木', '金', '土']
@@ -2275,6 +2245,49 @@ function App() {
             </p>
           </section>
 
+          <section className="card home-graph-card">
+            <div className="row">
+              <h2>推定消費カロリー</h2>
+              <span className="badge">{weeklyCalories.total.toLocaleString()} kcal</span>
+            </div>
+            <p className="home-graph-meta">
+              今日 {weeklyCaloriesSummary.todayCalories} / 平均 {weeklyCaloriesSummary.averageCalories} / 最大{' '}
+              {weeklyCaloriesSummary.maxDay.value}({weeklyCaloriesSummary.maxDay.label})
+            </p>
+            <div className="mini-chart">
+              {weeklyCalories.caloriesByDay.map((day) => {
+                const heightPercent = Math.max(8, Math.round((day.value / weeklyCaloriesSummary.maxValue) * 100))
+                const isToday = day.label === weeklyCaloriesSummary.todayLabel
+                return (
+                  <div key={day.label} className={`mini-chart-item ${isToday ? 'active' : ''}`}>
+                    <div className="mini-bar-track">
+                      <div className="mini-bar" style={{ height: `${heightPercent}%` }} />
+                    </div>
+                    <span>{day.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+
+          <button type="button" className="thumb-workout-cta" onClick={() => startWorkoutFlow(false)}>
+            {hasWorkoutDraft ? 'ワークアウト再開' : 'ワークアウト開始'}
+          </button>
+
+          <section className="home-kpi-inline">
+            <p className="kpi-chip">
+              <span className="kpi-label">前週比</span>
+              <strong className="kpi-value">{weeklyDeltaLabel}</strong>
+            </p>
+            <p className="kpi-chip">
+              <span className="kpi-label">連続日数</span>
+              <strong className="kpi-value">
+                {streakDays}
+                <small>日</small>
+              </strong>
+            </p>
+          </section>
+
           <section className="card home-last-workout-card">
             <div className="row">
               <h2>前回トレーニング</h2>
@@ -2315,56 +2328,6 @@ function App() {
             ) : (
               <p className="home-last-workout-empty">履歴が増えると前回内容をここに表示します。</p>
             )}
-          </section>
-
-          <section className="card home-graph-card">
-            <div className="row">
-              <h2>推定消費カロリー</h2>
-              <span className="badge">{weeklyCalories.total.toLocaleString()} kcal</span>
-            </div>
-            <p className="home-graph-meta">
-              今日 {weeklyCaloriesSummary.todayCalories} / 平均 {weeklyCaloriesSummary.averageCalories} / 最大{' '}
-              {weeklyCaloriesSummary.maxDay.value}({weeklyCaloriesSummary.maxDay.label})
-            </p>
-            <div className="mini-chart">
-              {weeklyCalories.caloriesByDay.map((day) => {
-                const heightPercent = Math.max(8, Math.round((day.value / weeklyCaloriesSummary.maxValue) * 100))
-                const isToday = day.label === weeklyCaloriesSummary.todayLabel
-                return (
-                  <div key={day.label} className={`mini-chart-item ${isToday ? 'active' : ''}`}>
-                    <div className="mini-bar-track">
-                      <div className="mini-bar" style={{ height: `${heightPercent}%` }} />
-                    </div>
-                    <span>{day.label}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </section>
-
-          <section className="home-kpi-inline">
-            <p className="kpi-chip">
-              <span className="kpi-label">前週比</span>
-              <strong className="kpi-value">{weeklyDeltaLabel}</strong>
-            </p>
-            <p className="kpi-chip">
-              <span className="kpi-label">連続</span>
-              <strong className="kpi-value">
-                {streakDays}
-                <small>日</small>
-              </strong>
-            </p>
-            <p className="kpi-chip">
-              <span className="kpi-label">部位バランス</span>
-              <strong className="kpi-value">
-                {bodyBalanceIndex}
-                <small>pt</small>
-              </strong>
-            </p>
-            <p className="kpi-chip">
-              <span className="kpi-label">強度推移</span>
-              <strong className="kpi-value">{weeklyIntensityTrendLabel}</strong>
-            </p>
           </section>
         </section>
       )}
@@ -2925,12 +2888,6 @@ function App() {
             ログアウト
           </button>
         </section>
-      )}
-
-      {tab === 'home' && (
-        <button type="button" className="thumb-workout-cta" onClick={() => startWorkoutFlow(false)}>
-          {hasWorkoutDraft ? 'ワークアウト再開' : 'ワークアウト開始'}
-        </button>
       )}
 
       {exerciseInfoTarget && (
