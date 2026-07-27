@@ -979,8 +979,8 @@ function App() {
   const [sets, setSets] = useState<ExerciseSet[]>([createSet(0), createSet(1), createSet(2)])
   const [restSeconds, setRestSeconds] = useState(90)
   const [timerRunning, setTimerRunning] = useState(false)
-  const [historyBodyPartFilter, setHistoryBodyPartFilter] = useState<BodyPart | 'all'>('all')
-  const [historyExerciseFilter, setHistoryExerciseFilter] = useState<string>('all')
+  const [historyBodyPartFilters, setHistoryBodyPartFilters] = useState<BodyPart[]>([])
+  const [historyExerciseFilters, setHistoryExerciseFilters] = useState<string[]>([])
   const [isHistorySelectionMode, setIsHistorySelectionMode] = useState(false)
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([])
   const [isHistoryDeleteConfirming, setIsHistoryDeleteConfirming] = useState(false)
@@ -1078,6 +1078,8 @@ function App() {
       setIsHistorySelectionMode(false)
       setSelectedHistoryIds([])
       setIsHistoryDeleteConfirming(false)
+      setHistoryBodyPartFilters([])
+      setHistoryExerciseFilters([])
     }
   }, [tab])
 
@@ -1268,11 +1270,11 @@ function App() {
   }, [historyBaseFiltered])
 
   const historyBodyPartFiltered = useMemo(() => {
-    if (historyBodyPartFilter === 'all') {
+    if (historyBodyPartFilters.length === 0) {
       return historyBaseFiltered
     }
-    return historyBaseFiltered.filter((session) => session.bodyPart === historyBodyPartFilter)
-  }, [historyBaseFiltered, historyBodyPartFilter])
+    return historyBaseFiltered.filter((session) => historyBodyPartFilters.includes(session.bodyPart))
+  }, [historyBaseFiltered, historyBodyPartFilters])
 
   const historyExerciseCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -1291,13 +1293,13 @@ function App() {
   }, [historyExerciseCounts])
 
   const groupedHistory = useMemo(() => {
-    if (historyExerciseFilter === 'all') {
+    if (historyExerciseFilters.length === 0) {
       return historyBodyPartFiltered
     }
     return historyBodyPartFiltered.filter((session) =>
-      session.exercises.some((exercise) => exercise.name === historyExerciseFilter),
+      session.exercises.some((exercise) => historyExerciseFilters.includes(exercise.name)),
     )
-  }, [historyBodyPartFiltered, historyExerciseFilter])
+  }, [historyBodyPartFiltered, historyExerciseFilters])
 
   const visibleHistoryIds = useMemo(() => groupedHistory.map((session) => session.id), [groupedHistory])
   const isAllVisibleHistorySelected = useMemo(
@@ -1362,25 +1364,15 @@ function App() {
 
   useEffect(() => {
     setIsHistoryDeleteConfirming(false)
-  }, [historyBodyPartFilter, historyExerciseFilter, historySelectedDate, selectedHistoryIds])
+  }, [historyBodyPartFilters, historyExerciseFilters, historySelectedDate, selectedHistoryIds])
 
   useEffect(() => {
-    if (historyBodyPartFilter === 'all') {
-      return
-    }
-    if ((historyBodyPartCounts.get(historyBodyPartFilter) ?? 0) === 0) {
-      setHistoryBodyPartFilter('all')
-    }
-  }, [historyBodyPartCounts, historyBodyPartFilter])
+    setHistoryBodyPartFilters((previous) => previous.filter((part) => (historyBodyPartCounts.get(part) ?? 0) > 0))
+  }, [historyBodyPartCounts])
 
   useEffect(() => {
-    if (historyExerciseFilter === 'all') {
-      return
-    }
-    if ((historyExerciseCounts.get(historyExerciseFilter) ?? 0) === 0) {
-      setHistoryExerciseFilter('all')
-    }
-  }, [historyExerciseCounts, historyExerciseFilter])
+    setHistoryExerciseFilters((previous) => previous.filter((exercise) => historyExerciseCounts.has(exercise)))
+  }, [historyExerciseCounts])
 
   const daysSinceByBodyPart = useMemo(() => {
     const today = dayjs()
@@ -2256,10 +2248,6 @@ function App() {
             </p>
           </section>
 
-          <button type="button" className="thumb-workout-cta" onClick={() => startWorkoutFlow(false)}>
-            {hasWorkoutDraft ? 'ワークアウト再開' : 'ワークアウト開始'}
-          </button>
-
           <section className="home-kpi-inline">
             <p className="kpi-chip">
               <span className="kpi-label">前週比</span>
@@ -2340,6 +2328,10 @@ function App() {
               <p className="home-last-workout-empty">履歴が増えると前回内容をここに表示します。</p>
             )}
           </section>
+
+          <button type="button" className="thumb-workout-cta" onClick={() => startWorkoutFlow(false)}>
+            {hasWorkoutDraft ? 'ワークアウト再開' : 'ワークアウト開始'}
+          </button>
         </section>
       )}
 
@@ -2657,11 +2649,11 @@ function App() {
           <div className="chip-row history-chip-row">
             <button
               type="button"
-              className={`chip-button ${historyBodyPartFilter === 'all' ? 'active' : ''}`}
+              className={`chip-button ${historyBodyPartFilters.length === 0 ? 'active' : ''}`}
               onClick={() => {
                 triggerHaptic(10)
-                setHistoryBodyPartFilter('all')
-                setHistoryExerciseFilter('all')
+                setHistoryBodyPartFilters([])
+                setHistoryExerciseFilters([])
               }}
             >
               全部位
@@ -2669,7 +2661,7 @@ function App() {
             </button>
             {BODY_PARTS.map((part) => {
               const count = historyBodyPartCounts.get(part) ?? 0
-              const isActive = historyBodyPartFilter === part
+              const isActive = historyBodyPartFilters.includes(part)
               return (
                 <button
                   key={part}
@@ -2678,8 +2670,12 @@ function App() {
                   disabled={!isActive && count === 0}
                   onClick={() => {
                     triggerHaptic(10)
-                    setHistoryBodyPartFilter(part)
-                    setHistoryExerciseFilter('all')
+                    setHistoryBodyPartFilters((previous) =>
+                      previous.includes(part)
+                        ? previous.filter((current) => current !== part)
+                        : [...previous, part],
+                    )
+                    setHistoryExerciseFilters([])
                   }}
                 >
                   {part}
@@ -2691,17 +2687,17 @@ function App() {
           <div className="chip-row history-chip-row history-exercise-chip-row">
             <button
               type="button"
-              className={`chip-button ${historyExerciseFilter === 'all' ? 'active' : ''}`}
+              className={`chip-button ${historyExerciseFilters.length === 0 ? 'active' : ''}`}
               onClick={() => {
                 triggerHaptic(10)
-                setHistoryExerciseFilter('all')
+                setHistoryExerciseFilters([])
               }}
             >
               全種目
               <small className="history-chip-count">{historyBodyPartFiltered.length}</small>
             </button>
             {historyExerciseChips.map((chip) => {
-              const isActive = historyExerciseFilter === chip.name
+              const isActive = historyExerciseFilters.includes(chip.name)
               return (
                 <button
                   key={chip.name}
@@ -2709,7 +2705,11 @@ function App() {
                   className={`chip-button ${isActive ? 'active' : ''}`}
                   onClick={() => {
                     triggerHaptic(10)
-                    setHistoryExerciseFilter(chip.name)
+                    setHistoryExerciseFilters((previous) =>
+                      previous.includes(chip.name)
+                        ? previous.filter((current) => current !== chip.name)
+                        : [...previous, chip.name],
+                    )
                   }}
                 >
                   {chip.name}
@@ -2758,7 +2758,7 @@ function App() {
                 <p className="history-selection-helper">
                   {isHistoryDeleteConfirming
                     ? '確認中：もう一度「削除」をタップで確定'
-                    : '削除したい履歴を選択してから「削除」をタップ'}
+                    : '部位/種目チップは複数選択できます。削除したい履歴を選択してから「削除」をタップ'}
                 </p>
                 <div className="history-selection-actions">
                   <button
