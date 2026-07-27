@@ -915,6 +915,7 @@ function App() {
   const [historyQuery, setHistoryQuery] = useState('')
   const [isHistorySelectionMode, setIsHistorySelectionMode] = useState(false)
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([])
+  const [isHistoryDeleteConfirming, setIsHistoryDeleteConfirming] = useState(false)
   const [isDeletingHistory, setIsDeletingHistory] = useState(false)
   const [historyMonthCursor, setHistoryMonthCursor] = useState(() => dayjs().startOf('month').format('YYYY-MM-DD'))
   const [historySelectedDate, setHistorySelectedDate] = useState<string | null>(null)
@@ -999,6 +1000,7 @@ function App() {
     if (tab !== 'history') {
       setIsHistorySelectionMode(false)
       setSelectedHistoryIds([])
+      setIsHistoryDeleteConfirming(false)
     }
   }, [tab])
 
@@ -1163,6 +1165,10 @@ function App() {
   }, [historyMonth, historyQuery, historySelectedDate, sessions])
 
   const visibleHistoryIds = useMemo(() => groupedHistory.map((session) => session.id), [groupedHistory])
+  const isAllVisibleHistorySelected = useMemo(
+    () => visibleHistoryIds.length > 0 && selectedHistoryIds.length === visibleHistoryIds.length,
+    [selectedHistoryIds.length, visibleHistoryIds],
+  )
 
   const historyDateSections = useMemo(() => {
     const sections = new Map<
@@ -1218,6 +1224,10 @@ function App() {
   useEffect(() => {
     setSelectedHistoryIds((previous) => previous.filter((id) => visibleHistoryIds.includes(id)))
   }, [visibleHistoryIds])
+
+  useEffect(() => {
+    setIsHistoryDeleteConfirming(false)
+  }, [historyQuery, historySelectedDate, selectedHistoryIds])
 
   const daysSinceByBodyPart = useMemo(() => {
     const today = dayjs()
@@ -1802,6 +1812,7 @@ function App() {
 
       setSelectedHistoryIds([])
       setIsHistorySelectionMode(false)
+      setIsHistoryDeleteConfirming(false)
       showToast(`${sessionIds.length}件の履歴を削除しました`)
       setAuthError(null)
     } catch (error) {
@@ -2296,6 +2307,11 @@ function App() {
                 type="button"
                 className="history-delete-btn"
                 onClick={() => {
+                  if (visibleHistoryIds.length === 0) {
+                    triggerHaptic(8)
+                    showToast('削除できる履歴がありません', 'error')
+                    return
+                  }
                   triggerHaptic(12)
                   setIsHistorySelectionMode(true)
                 }}
@@ -2304,28 +2320,43 @@ function App() {
               </button>
             ) : (
               <>
+                <p className="history-selection-status">
+                  選択中 {selectedHistoryIds.length} / {visibleHistoryIds.length}
+                </p>
                 <button
                   type="button"
                   className="history-delete-btn"
+                  disabled={visibleHistoryIds.length === 0}
                   onClick={() => {
                     triggerHaptic(10)
-                    setSelectedHistoryIds((previous) =>
-                      previous.length === visibleHistoryIds.length ? [] : [...visibleHistoryIds],
-                    )
+                    setSelectedHistoryIds(() => (isAllVisibleHistorySelected ? [] : [...visibleHistoryIds]))
                   }}
                 >
-                  {selectedHistoryIds.length === visibleHistoryIds.length ? '全解除' : '全選択'}
+                  {visibleHistoryIds.length === 0
+                    ? '対象なし'
+                    : isAllVisibleHistorySelected
+                      ? '全解除'
+                      : '全選択'}
                 </button>
                 <button
                   type="button"
                   className={`history-delete-btn danger ${selectedHistoryIds.length === 0 ? 'disabled' : ''}`}
                   disabled={selectedHistoryIds.length === 0 || isDeletingHistory}
                   onClick={() => {
-                    triggerHaptic(20)
-                    void handleDeleteHistorySessions(selectedHistoryIds)
+                    if (!isHistoryDeleteConfirming) {
+                      triggerHaptic(12)
+                      setIsHistoryDeleteConfirming(true)
+                      return
+                    }
+                    triggerHaptic(22)
+                    void handleDeleteHistorySessions([...selectedHistoryIds])
                   }}
                 >
-                  {isDeletingHistory ? '削除中...' : `${selectedHistoryIds.length}件削除`}
+                  {isDeletingHistory
+                    ? '削除中...'
+                    : isHistoryDeleteConfirming
+                      ? 'もう一度タップで削除'
+                      : `${selectedHistoryIds.length}件削除`}
                 </button>
                 <button
                   type="button"
@@ -2334,6 +2365,7 @@ function App() {
                     triggerHaptic(10)
                     setIsHistorySelectionMode(false)
                     setSelectedHistoryIds([])
+                    setIsHistoryDeleteConfirming(false)
                   }}
                 >
                   キャンセル
@@ -2373,6 +2405,7 @@ function App() {
                             type="button"
                             className={`history-select-btn ${selectedHistoryIds.includes(session.id) ? 'selected' : ''}`}
                             onClick={() => {
+                              triggerHaptic(10)
                               setSelectedHistoryIds((previous) =>
                                 previous.includes(session.id)
                                   ? previous.filter((id) => id !== session.id)
