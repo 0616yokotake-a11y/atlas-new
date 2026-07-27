@@ -21,6 +21,7 @@ import { requestAiFeedback } from './lib/aiFeedback'
 import type { BodyPart, ExerciseSet, WorkoutSession } from './types'
 
 type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'settings'
+type MainTab = Exclude<AppTab, 'settings'>
 type AuthMode = 'login' | 'signup' | 'reset'
 type WorkoutPhase = 'body' | 'exercise' | 'record'
 type PickerTargetKey = 'weight' | 'reps'
@@ -1017,6 +1018,7 @@ function App() {
   const pickerOpenValueRef = useRef(0)
   const toastTimerRef = useRef<number | null>(null)
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
+  const previousMainTabRef = useRef<MainTab>('home')
   const [phoneConfirmation, setPhoneConfirmation] = useState<ConfirmationResult | null>(null)
 
   useEffect(() => {
@@ -1800,7 +1802,21 @@ function App() {
     if (nextTab !== tab) {
       triggerHaptic(pattern)
     }
+    if (nextTab !== 'settings') {
+      previousMainTabRef.current = nextTab
+    }
     setTab(nextTab)
+  }
+
+  function handleTopSettingsToggle() {
+    if (tab === 'settings') {
+      triggerHaptic(18)
+      setTab(previousMainTabRef.current)
+      return
+    }
+    previousMainTabRef.current = tab
+    triggerHaptic(18)
+    setTab('settings')
   }
 
   const selectedExerciseProfile = useMemo(() => getExerciseInputProfile(selectedExercise), [selectedExercise])
@@ -2242,8 +2258,8 @@ function App() {
         <button
           type="button"
           className={`top-settings-btn ${tab === 'settings' ? 'active' : ''}`}
-          onClick={() => vibrateAndSetTab('settings', 18)}
-          aria-label="設定を開く"
+          onClick={handleTopSettingsToggle}
+          aria-label={tab === 'settings' ? '前の画面に戻る' : '設定を開く'}
         >
           ⚙
         </button>
@@ -3075,7 +3091,7 @@ function App() {
           onClick={() => startWorkoutFlow(false)}
           className={tab === 'workout' ? 'active' : ''}
         >
-          ワークアウト
+          ワーク
         </button>
         <button
           type="button"
@@ -3090,13 +3106,6 @@ function App() {
           className={tab === 'analytics' ? 'active' : ''}
         >
           分析
-        </button>
-        <button
-          type="button"
-          onClick={() => vibrateAndSetTab('settings', 10)}
-          className={tab === 'settings' ? 'active' : ''}
-        >
-          設定
         </button>
       </nav>
     </main>
