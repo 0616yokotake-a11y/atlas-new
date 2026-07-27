@@ -1407,6 +1407,24 @@ function App() {
     return { caloriesByDay, total }
   }, [sessions])
 
+  const weeklyCaloriesSummary = useMemo(() => {
+    const dayLabels = ['日', '月', '火', '水', '木', '金', '土']
+    const todayLabel = dayLabels[dayjs().day()]
+    const todayCalories = weeklyCalories.caloriesByDay.find((day) => day.label === todayLabel)?.value ?? 0
+    const averageCalories = Math.round(weeklyCalories.total / 7)
+    const maxDay = weeklyCalories.caloriesByDay.reduce(
+      (best, day) => (day.value > best.value ? day : best),
+      weeklyCalories.caloriesByDay[0] ?? { label: todayLabel, value: 0 },
+    )
+    return {
+      todayLabel,
+      todayCalories,
+      averageCalories,
+      maxDay,
+      maxValue: Math.max(...weeklyCalories.caloriesByDay.map((item) => item.value), 1),
+    }
+  }, [weeklyCalories])
+
   const homeAiMessage = useMemo(() => {
     if (aiFeedback[0]) {
       const compact = aiFeedback[0].replace(/\s+/g, ' ').trim()
@@ -2094,15 +2112,20 @@ function App() {
               <h2>推定消費カロリー</h2>
               <span className="badge">{weeklyCalories.total.toLocaleString()} kcal</span>
             </div>
+            <p className="home-graph-meta">
+              今日 {weeklyCaloriesSummary.todayCalories} / 平均 {weeklyCaloriesSummary.averageCalories} / 最大{' '}
+              {weeklyCaloriesSummary.maxDay.value}({weeklyCaloriesSummary.maxDay.label})
+            </p>
             <div className="mini-chart">
               {weeklyCalories.caloriesByDay.map((day) => {
-                const max = Math.max(...weeklyCalories.caloriesByDay.map((item) => item.value), 1)
-                const heightPercent = Math.max(8, Math.round((day.value / max) * 100))
+                const heightPercent = Math.max(8, Math.round((day.value / weeklyCaloriesSummary.maxValue) * 100))
+                const isToday = day.label === weeklyCaloriesSummary.todayLabel
                 return (
-                  <div key={day.label} className="mini-chart-item">
+                  <div key={day.label} className={`mini-chart-item ${isToday ? 'active' : ''}`}>
                     <div className="mini-bar-track">
                       <div className="mini-bar" style={{ height: `${heightPercent}%` }} />
                     </div>
+                    <small className="mini-bar-value">{day.value > 0 ? day.value : '-'}</small>
                     <span>{day.label}</span>
                   </div>
                 )
