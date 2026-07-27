@@ -35,10 +35,6 @@ type ExerciseGuidanceSpec = {
   focus: string
   tip: string
 }
-type PlanFeature = {
-  label: string
-  tone?: 'default' | 'accent'
-}
 type ExerciseInputProfile = {
   defaultWeight: number
   defaultReps: number
@@ -123,20 +119,6 @@ const EXERCISE_INFO: Record<string, string> = {
   ケーブルクランチ: 'やり方: ロープを持って肋骨を骨盤へ丸め込む。注意: 腕で引かず腹直筋で縮める。',
   サイドプランク: 'やり方: 体を一直線に保ち、脇腹で支える。注意: 腰が落ちないようにする。',
 }
-
-const FREE_PLAN_FEATURES: PlanFeature[] = [
-  { label: 'ローカル保存の履歴' },
-  { label: '基本の検索' },
-  { label: '週間頻度 / 総重量' },
-  { label: 'オフライン利用', tone: 'accent' },
-]
-
-const PRO_PLAN_FEATURES: PlanFeature[] = [
-  { label: 'クラウド同期', tone: 'accent' },
-  { label: '端末間バックアップ' },
-  { label: '詳細分析 / 長期推移' },
-  { label: 'AIフィードバック' },
-]
 
 function getExerciseGuidanceSpec(exerciseName: string): ExerciseGuidanceSpec {
   if (['ベンチプレス', 'インクラインベンチ', 'ディクラインプレス', 'スミスマシンベンチ', 'ナローベンチプレス'].includes(exerciseName)) {
@@ -500,18 +482,6 @@ function ExerciseTextGuide({ exerciseName }: { exerciseName: string }) {
       <p className="exercise-guide-tip">
         <strong>コツ</strong> {tip}
       </p>
-    </div>
-  )
-}
-
-function PlanFeatureList({ features }: { features: PlanFeature[] }) {
-  return (
-    <div className="plan-feature-list">
-      {features.map((feature) => (
-        <span key={feature.label} className={`plan-chip ${feature.tone === 'accent' ? 'accent' : ''}`}>
-          {feature.label}
-        </span>
-      ))}
     </div>
   )
 }
@@ -2104,16 +2074,7 @@ function App() {
 
       {tab === 'history' && (
         <section className="card">
-          <div className="row">
-            <h2>履歴</h2>
-            <span className="badge">Free</span>
-          </div>
-          <div className="plan-preview-banner">
-            <div>
-              <strong>履歴は無料で使える</strong>
-              <p>まずは端末保存で十分使える形にして、将来 Pro でクラウド同期を解放する想定です。</p>
-            </div>
-          </div>
+          <h2>履歴</h2>
           <input
             value={historyQuery}
             onChange={(e) => setHistoryQuery(e.target.value)}
@@ -2133,39 +2094,12 @@ function App() {
             </article>
           ))}
           {groupedHistory.length === 0 && <p>履歴がありません。</p>}
-          <section className="plan-grid">
-            <article className="plan-card current">
-              <div className="row">
-                <h3>Free で使える履歴</h3>
-                <span className="badge">今ここ</span>
-              </div>
-              <p className="plan-copy">無料のままでも、記録確認・検索・前回参照までは気持ちよく使える設計にする。</p>
-              <PlanFeatureList features={FREE_PLAN_FEATURES} />
-            </article>
-            <article className="plan-card premium">
-              <div className="row">
-                <h3>Pro で広げる履歴</h3>
-                <span className="badge premium">Pro</span>
-              </div>
-              <p className="plan-copy">機種変更や複数端末でも履歴を残し、積み上げた記録を資産化する。</p>
-              <PlanFeatureList features={PRO_PLAN_FEATURES} />
-            </article>
-          </section>
         </section>
       )}
 
       {tab === 'analytics' && (
         <section className="card">
-          <div className="row">
-            <h2>分析</h2>
-            <span className="badge premium">Pro候補</span>
-          </div>
-          <div className="plan-preview-banner premium">
-            <div>
-              <strong>ここを将来の課金価値にする案</strong>
-              <p>今は簡易分析を見せつつ、詳細分析とAI分析を Pro の核に育てるイメージです。</p>
-            </div>
-          </div>
+          <h2>分析</h2>
           <h3>部位頻度</h3>
           {analytics.frequency.map((item) => (
             <div key={item.part} className="row">
@@ -2188,37 +2122,6 @@ function App() {
           {(aiFeedback.length > 0 ? aiFeedback : analytics.feedback).map((text) => (
             <p key={text} className="feedback-line">・{text}</p>
           ))}
-          <section className="analytics-preview-stack">
-            <article className="mini-preview-card">
-              <div className="row">
-                <h3>Free 分析</h3>
-                <span className="badge">公開</span>
-              </div>
-              <p className="plan-copy">頻度・総重量・簡易グラフで「続いてる感」を出す。</p>
-              <PlanFeatureList
-                features={[
-                  { label: '週間頻度' },
-                  { label: '総重量' },
-                  { label: '簡易グラフ' },
-                ]}
-              />
-            </article>
-            <article className="mini-preview-card premium">
-              <div className="row">
-                <h3>Pro 分析プレビュー</h3>
-                <span className="badge premium">準備中</span>
-              </div>
-              <p className="plan-copy">月間/年間推移、部位バランス、停滞検知、AI提案まで見せる構想。</p>
-              <PlanFeatureList
-                features={[
-                  { label: '月間 / 年間推移', tone: 'accent' },
-                  { label: '部位バランス詳細' },
-                  { label: '停滞検知' },
-                  { label: 'AI提案' },
-                ]}
-              />
-            </article>
-          </section>
         </section>
       )}
 
@@ -2226,23 +2129,6 @@ function App() {
         <section className="card">
           <h2>設定</h2>
           <p>プロフィール: {user?.email ?? 'デモユーザー'}</p>
-          <section className="plan-summary-card">
-            <div className="row">
-              <h3>プラン方針</h3>
-              <span className="badge">設計中</span>
-            </div>
-            <p className="plan-copy">無料版はローカル保存中心。Pro でクラウド同期と詳細分析を解放する形を想定。</p>
-            <div className="plan-grid compact">
-              <article className="plan-card current">
-                <h4>Free</h4>
-                <PlanFeatureList features={FREE_PLAN_FEATURES} />
-              </article>
-              <article className="plan-card premium">
-                <h4>Atlas Pro</h4>
-                <PlanFeatureList features={PRO_PLAN_FEATURES} />
-              </article>
-            </div>
-          </section>
           {authError && <p className="error">{authError}</p>}
           <button type="button" onClick={logout}>
             ログアウト
