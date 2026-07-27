@@ -152,10 +152,47 @@ body {
   padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 10px;
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(10px);
   min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(186, 230, 253, 0.58), transparent);
+  opacity: 0.75;
+}
+
+.card::after {
+  content: '';
+  position: absolute;
+  top: -28%;
+  right: -32%;
+  width: 58%;
+  height: 58%;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.18), transparent 70%);
+  pointer-events: none;
+}
+
+.card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.card > h2 {
+  letter-spacing: 0.02em;
+  font-weight: 700;
+}
+
+.card > p {
+  margin: 0;
 }
 
 h2,
@@ -726,17 +763,29 @@ button:disabled {
 
 .home-grid {
   display: grid;
-  grid-template-rows: auto 2fr 1fr;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   align-content: start;
-  gap: 4px;
+  gap: 6px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
 .home-grid .card {
-  gap: 5px;
-  padding: 7px;
+  gap: 7px;
+  padding: 9px;
+}
+
+.home-primary-card {
+  border-color: rgba(125, 211, 252, 0.28);
+}
+
+.home-last-workout-card {
+  border-color: rgba(167, 139, 250, 0.28);
+}
+
+.home-graph-card {
+  border-color: rgba(96, 165, 250, 0.28);
 }
 
 .workout-screen {
@@ -1246,7 +1295,7 @@ button.holding {
 }
 
 .home-last-workout-meta {
-  margin: 2px 0 8px;
+  margin: 0 0 8px;
   color: #cbd5e1;
   font-size: 0.82rem;
 }
@@ -1261,8 +1310,8 @@ button.holding {
   margin: 0;
   padding: 6px 7px;
   border-radius: 8px;
-  border: 1px solid rgba(96, 165, 250, 0.24);
-  background: rgba(30, 41, 59, 0.45);
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  background: rgba(30, 41, 59, 0.52);
   display: grid;
   gap: 2px;
 }
@@ -1286,9 +1335,10 @@ button.holding {
 
 .home-last-workout-lines p {
   margin: 0;
-  padding: 6px 8px;
+  padding: 7px 8px;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.48);
+  background: rgba(15, 23, 42, 0.56);
+  border: 1px solid rgba(125, 211, 252, 0.16);
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 6px;
@@ -1354,12 +1404,15 @@ button.holding {
   min-height: 100%;
   padding: 8px 9px;
   border-radius: 10px;
-  border: 1px solid rgba(96, 165, 250, 0.28);
-  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(125, 211, 252, 0.26);
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(34, 211, 238, 0.12), transparent 72%),
+    rgba(30, 41, 59, 0.58);
   display: grid;
   grid-template-rows: auto auto;
   align-content: center;
   gap: 3px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .kpi-chip span {
