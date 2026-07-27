@@ -2426,7 +2426,7 @@ function App() {
               )
             })}
           </div>
-          <div className="history-bulk-actions">
+          <div className={`history-bulk-actions ${isHistorySelectionMode ? 'selection-mode' : ''}`}>
             {!isHistorySelectionMode ? (
               <button
                 type="button"
@@ -2438,6 +2438,7 @@ function App() {
                     return
                   }
                   triggerHaptic(12)
+                  setIsHistoryDeleteConfirming(false)
                   setIsHistorySelectionMode(true)
                 }}
               >
@@ -2445,56 +2446,65 @@ function App() {
               </button>
             ) : (
               <>
-                <p className="history-selection-status">
-                  選択中 {selectedHistoryIds.length} / {visibleHistoryIds.length}
+                <div className="history-selection-header">
+                  <p className="history-selection-status">
+                    選択中 {selectedHistoryIds.length} / {visibleHistoryIds.length}
+                  </p>
+                  <button
+                    type="button"
+                    className="history-delete-btn"
+                    onClick={() => {
+                      triggerHaptic(10)
+                      setIsHistorySelectionMode(false)
+                      setSelectedHistoryIds([])
+                      setIsHistoryDeleteConfirming(false)
+                    }}
+                  >
+                    選択終了
+                  </button>
+                </div>
+                <p className="history-selection-helper">
+                  {isHistoryDeleteConfirming
+                    ? '確認中：もう一度「削除」をタップで確定'
+                    : '削除したい履歴を選択してから「削除」をタップ'}
                 </p>
-                <button
-                  type="button"
-                  className="history-delete-btn"
-                  disabled={visibleHistoryIds.length === 0}
-                  onClick={() => {
-                    triggerHaptic(10)
-                    setSelectedHistoryIds(() => (isAllVisibleHistorySelected ? [] : [...visibleHistoryIds]))
-                  }}
-                >
-                  {visibleHistoryIds.length === 0
-                    ? '対象なし'
-                    : isAllVisibleHistorySelected
-                      ? '全解除'
-                      : '全選択'}
-                </button>
-                <button
-                  type="button"
-                  className={`history-delete-btn danger ${selectedHistoryIds.length === 0 ? 'disabled' : ''}`}
-                  disabled={selectedHistoryIds.length === 0 || isDeletingHistory}
-                  onClick={() => {
-                    if (!isHistoryDeleteConfirming) {
-                      triggerHaptic(12)
-                      setIsHistoryDeleteConfirming(true)
-                      return
-                    }
-                    triggerHaptic(22)
-                    void handleDeleteHistorySessions([...selectedHistoryIds])
-                  }}
-                >
-                  {isDeletingHistory
-                    ? '削除中...'
-                    : isHistoryDeleteConfirming
-                      ? 'もう一度タップで削除'
-                      : `${selectedHistoryIds.length}件削除`}
-                </button>
-                <button
-                  type="button"
-                  className="history-delete-btn"
-                  onClick={() => {
-                    triggerHaptic(10)
-                    setIsHistorySelectionMode(false)
-                    setSelectedHistoryIds([])
-                    setIsHistoryDeleteConfirming(false)
-                  }}
-                >
-                  キャンセル
-                </button>
+                <div className="history-selection-actions">
+                  <button
+                    type="button"
+                    className="history-delete-btn"
+                    disabled={visibleHistoryIds.length === 0}
+                    onClick={() => {
+                      triggerHaptic(10)
+                      setSelectedHistoryIds(() => (isAllVisibleHistorySelected ? [] : [...visibleHistoryIds]))
+                    }}
+                  >
+                    {visibleHistoryIds.length === 0
+                      ? '対象なし'
+                      : isAllVisibleHistorySelected
+                        ? '全件解除'
+                        : '全件選択'}
+                  </button>
+                  <button
+                    type="button"
+                    className={`history-delete-btn danger ${selectedHistoryIds.length === 0 ? 'disabled' : ''}`}
+                    disabled={selectedHistoryIds.length === 0 || isDeletingHistory}
+                    onClick={() => {
+                      if (!isHistoryDeleteConfirming) {
+                        triggerHaptic(12)
+                        setIsHistoryDeleteConfirming(true)
+                        return
+                      }
+                      triggerHaptic(22)
+                      void handleDeleteHistorySessions([...selectedHistoryIds])
+                    }}
+                  >
+                    {isDeletingHistory
+                      ? '削除中...'
+                      : isHistoryDeleteConfirming
+                        ? `再タップで${selectedHistoryIds.length}件削除`
+                        : `${selectedHistoryIds.length}件削除`}
+                  </button>
+                </div>
               </>
             )}
           </div>

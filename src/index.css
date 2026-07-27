@@ -509,12 +509,41 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.history-bulk-actions.selection-mode {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.history-selection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .history-selection-status {
   margin: 0;
   padding: 0 2px;
   color: #cbd5e1;
   font-size: 0.76rem;
   align-self: center;
+}
+
+.history-selection-helper {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.history-selection-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .history-delete-btn {
