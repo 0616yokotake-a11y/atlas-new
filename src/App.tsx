@@ -24,8 +24,16 @@ type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'settings'
 type AuthMode = 'login' | 'signup' | 'reset'
 type WorkoutPhase = 'body' | 'exercise' | 'record'
 type PickerTargetKey = 'weight' | 'reps'
+type BodyPartBadgeTone = 'new' | 'fresh' | 'ready' | 'stale'
 type ExercisePreference = {
   restSeconds: number
+}
+type ExerciseGuidanceSpec = {
+  setup: string
+  cue: string
+  equipment: string
+  focus: string
+  tip: string
 }
 type ExerciseInputProfile = {
   defaultWeight: number
@@ -42,6 +50,12 @@ const WHEEL_ITEM_HEIGHT = 54
 const WHEEL_VISIBLE_ROWS = 5
 const WHEEL_SIDE_PADDING = ((WHEEL_VISIBLE_ROWS - 1) / 2) * WHEEL_ITEM_HEIGHT
 const EXERCISE_PREFERENCES_STORAGE_KEY = 'atlas.exercise-preferences.v1'
+
+function triggerHaptic(pattern: number | number[]) {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    navigator.vibrate(pattern)
+  }
+}
 
 const EXERCISE_INFO: Record<string, string> = {
   ベンチプレス: 'やり方: 肩甲骨を寄せて胸を張り、バーをみぞおちへ下ろして真上に押す。注意: 手首を寝かせず、反動でバウンドしない。',
@@ -106,43 +120,95 @@ const EXERCISE_INFO: Record<string, string> = {
   サイドプランク: 'やり方: 体を一直線に保ち、脇腹で支える。注意: 腰が落ちないようにする。',
 }
 
-function getExerciseGuidanceSpec(exerciseName: string): {
-  cue: string
-  equipment: string
-  focus: string
-  tip: string
-} {
+function getExerciseGuidanceSpec(exerciseName: string): ExerciseGuidanceSpec {
+  if (['ベンチプレス', 'インクラインベンチ', 'ディクラインプレス', 'スミスマシンベンチ', 'ナローベンチプレス'].includes(exerciseName)) {
+    return {
+      setup: 'ベンチに仰向けで寝て、足裏を床につける。',
+      cue: '肩甲骨を寄せて胸を張り、バーを胸へ下ろして真上へ押し返す。',
+      equipment: 'ベンチ / バーベル',
+      focus: '胸・三頭筋',
+      tip: 'みぞおち付近へ下ろすと肩前に逃げにくい。',
+    }
+  }
+
+  if (exerciseName === 'ダンベルプレス') {
+    return {
+      setup: 'ベンチに仰向けで寝て、ダンベルを胸の横に構える。',
+      cue: '肘をやや内側へ向けたまま下ろし、弧を描くように押し上げる。',
+      equipment: 'ベンチ / ダンベル',
+      focus: '胸・三頭筋',
+      tip: '下で止まりすぎず、胸の張りを保ったまま往復する。',
+    }
+  }
+
+  if (exerciseName === 'チェストプレス') {
+    return {
+      setup: 'マシンに座って背中をシートへつけ、グリップを胸の高さに合わせる。',
+      cue: '胸を張ったまま前へ押し切り、戻しはゆっくりコントロールする。',
+      equipment: 'チェストプレスマシン',
+      focus: '胸・三頭筋',
+      tip: 'シートが低すぎると肩に入りやすいので胸中央に合う高さにする。',
+    }
+  }
+
+  if (exerciseName === 'プッシュアップ') {
+    return {
+      setup: 'うつ伏せで手を床につき、頭からかかとまで一直線に保つ。',
+      cue: '胸を床へ近づけてから、手のひらで床を押して体を持ち上げる。',
+      equipment: '自重',
+      focus: '胸・三頭筋',
+      tip: '腰が落ちるなら可動域を少し浅くして姿勢優先で行う。',
+    }
+  }
+
+  if (exerciseName === 'ペックフライ') {
+    return {
+      setup: 'マシンに深く座り、肘を軽く曲げたままパッドを構える。',
+      cue: '胸を開いてストレッチし、前で抱え込むように閉じる。',
+      equipment: 'ペックフライマシン',
+      focus: '胸内側・ストレッチ',
+      tip: '肩をすくめず、胸の収縮で閉じる意識を優先する。',
+    }
+  }
+
+  if (exerciseName === 'ケーブルフライ') {
+    return {
+      setup: '立って片足を軽く前に出し、胸の横からケーブルを構える。',
+      cue: '胸を張ったまま弧を描くように前で手を寄せる。',
+      equipment: 'ケーブル',
+      focus: '胸内側・ストレッチ',
+      tip: '上体をぶらさず、手ではなく胸で閉じる感覚を作る。',
+    }
+  }
+
+  if (exerciseName === 'ダンベルフライ') {
+    return {
+      setup: 'ベンチに仰向けで寝て、肘を軽く曲げたまま胸の上に構える。',
+      cue: '大きく開いて胸を伸ばし、同じ弧で胸の上へ戻す。',
+      equipment: 'ベンチ / ダンベル',
+      focus: '胸内側・ストレッチ',
+      tip: '肩前が痛むほど深く下ろしすぎない。',
+    }
+  }
+
   if (
     [
-      'ベンチプレス',
-      'インクラインベンチ',
-      'ダンベルプレス',
-      'チェストプレス',
-      'ディクラインプレス',
-      'スミスマシンベンチ',
-      'プッシュアップ',
-      'ナローベンチプレス',
+      'ラットプルダウン',
+      'チンニング',
+      'ストレートアームプルダウン',
+      'プルオーバー',
     ].includes(exerciseName)
   ) {
+    const setup =
+      exerciseName === 'ラットプルダウン'
+        ? 'マシンに座って太ももをパッドで固定し、腕を上へ伸ばしてバーを握る。'
+        : exerciseName === 'チンニング'
+          ? 'バーにぶら下がり、胸を軽く張ったまま足を組む。'
+          : exerciseName === 'ストレートアームプルダウン'
+            ? '立って胸を張り、腕を伸ばしたままバーを肩幅で握る。'
+            : 'ベンチに仰向けで寝るか、マシンの軌道に合わせて胸を張る。'
     return {
-      cue: '胸を張って、下ろす位置と押し返す軌道を毎回そろえる。',
-      equipment: 'ベンチ / バー / 自重',
-      focus: '胸・三頭筋',
-      tip: '肩甲骨を寄せたまま押すと胸に入りやすい。',
-    }
-  }
-
-  if (['ペックフライ', 'ケーブルフライ', 'ダンベルフライ'].includes(exerciseName)) {
-    return {
-      cue: '胸を開いてストレッチし、前で抱え込むように閉じる。',
-      equipment: 'ケーブル / ダンベル',
-      focus: '胸内側・ストレッチ',
-      tip: '肘角度を固定すると腕ではなく胸で動かしやすい。',
-    }
-  }
-
-  if (['ラットプルダウン', 'チンニング', 'ストレートアームプルダウン', 'プルオーバー'].includes(exerciseName)) {
-    return {
+      setup,
       cue: '胸を張ったまま、上から下へ引きつける。',
       equipment: 'ラットマシン / バー',
       focus: '広背筋・大円筋',
@@ -150,8 +216,9 @@ function getExerciseGuidanceSpec(exerciseName: string): {
     }
   }
 
-  if (['ローイング', 'ワンハンドロー', 'シーテッドロー', 'Tバーロー', 'バーベルロー', 'フェイスプル'].includes(exerciseName)) {
+  if (['ローイング', 'シーテッドロー'].includes(exerciseName)) {
     return {
+      setup: '座って足と胸を安定させ、みぞおちへ引ける位置でグリップを握る。',
       cue: '肘を後ろへ引き、背中で重さを受け止める。',
       equipment: 'ケーブル / ダンベル / バー',
       focus: '背中中部・僧帽筋',
@@ -159,8 +226,39 @@ function getExerciseGuidanceSpec(exerciseName: string): {
     }
   }
 
+  if (exerciseName === 'ワンハンドロー') {
+    return {
+      setup: 'ベンチに片手と片膝を乗せ、背中を床と平行に近づける。',
+      cue: '胸を張ったまま、肘を腰へ向けて引き上げる。',
+      equipment: 'ベンチ / ダンベル',
+      focus: '広背筋・背中中部',
+      tip: '肩が前へ巻かれないよう、トップで一瞬止めると効きやすい。',
+    }
+  }
+
+  if (['Tバーロー', 'バーベルロー'].includes(exerciseName)) {
+    return {
+      setup: '立って股関節から前傾し、背中を固めたままバーを持つ。',
+      cue: '前傾角度を保ったまま下腹部へ引きつける。',
+      equipment: 'バー / Tバーマシン',
+      focus: '背中中部・広背筋',
+      tip: '上体を起こして反動を使うほど狙いがぶれやすい。',
+    }
+  }
+
+  if (exerciseName === 'フェイスプル') {
+    return {
+      setup: '立って胸を張り、ロープを顔の高さで握る。',
+      cue: '肘を外へ開きながら顔へ引き、肩甲骨を寄せる。',
+      equipment: 'ケーブル / ロープ',
+      focus: '肩後部・僧帽筋',
+      tip: '腰を反らず、ロープを鼻から耳の横へ割るように引く。',
+    }
+  }
+
   if (['デッドリフト'].includes(exerciseName)) {
     return {
+      setup: '立って足を腰幅に置き、バーをすねの前で握って背中を固める。',
       cue: '股関節から起こし、バーを体に沿わせて持ち上げる。',
       equipment: 'バーベル',
       focus: '背面全体',
@@ -168,17 +266,29 @@ function getExerciseGuidanceSpec(exerciseName: string): {
     }
   }
 
-  if (['ショルダープレス', 'アーノルドプレス', 'マシンショルダープレス'].includes(exerciseName)) {
+  if (['ショルダープレス', 'アーノルドプレス'].includes(exerciseName)) {
     return {
+      setup: '座るか立って体幹を締め、ダンベルを耳の横に構える。',
       cue: '耳の横から真上へ押し上げる。',
-      equipment: 'ダンベル / マシン',
+      equipment: 'ダンベル',
       focus: '三角筋前部・中部',
       tip: 'みぞおちを締めて腰反りを防ぐと安定する。',
     }
   }
 
-  if (['サイドレイズ', 'リアレイズ', 'フロントレイズ', 'ケーブルサイドレイズ', 'アップライトロー', 'シュラッグ'].includes(exerciseName)) {
+  if (exerciseName === 'マシンショルダープレス') {
     return {
+      setup: 'マシンに座って背中を預け、グリップを耳の横に合わせる。',
+      cue: '肩をすくめず、真上へ押してゆっくり戻す。',
+      equipment: 'ショルダープレスマシン',
+      focus: '三角筋前部・中部',
+      tip: 'シートが低すぎると肘が落ちて肩前に入りやすい。',
+    }
+  }
+
+  if (['サイドレイズ', 'フロントレイズ', 'ケーブルサイドレイズ', 'アップライトロー', 'シュラッグ'].includes(exerciseName)) {
+    return {
+      setup: '立って胸を張り、腕を体の横か前に自然に下ろして構える。',
       cue: '反動を抑えて、肩主導で持ち上げる。',
       equipment: 'ダンベル / ケーブル',
       focus: '三角筋・僧帽筋',
@@ -186,17 +296,66 @@ function getExerciseGuidanceSpec(exerciseName: string): {
     }
   }
 
-  if (['スクワット', 'レッグプレス', 'ブルガリアンスクワット', 'ハックスクワット', 'ランジ', 'レッグエクステンション', 'カーフレイズ'].includes(exerciseName)) {
+  if (exerciseName === 'リアレイズ') {
     return {
+      setup: '軽く前傾して立つかベンチにもたれ、肘を少し曲げて腕を下ろす。',
+      cue: '肘を外へ開くように持ち上げ、肩後部を縮める。',
+      equipment: 'ダンベル / マシン',
+      focus: '肩後部',
+      tip: '首ですくめると僧帽に逃げるので、肩を下げたまま動かす。',
+    }
+  }
+
+  if (['スクワット', 'ランジ'].includes(exerciseName)) {
+    return {
+      setup: '立って足幅を安定させ、胸を張ってお腹に力を入れる。',
       cue: 'しゃがんで脚で押し返す。',
-      equipment: 'バーベル / マシン / 自重',
+      equipment: 'バーベル / 自重',
       focus: '大腿四頭筋・臀筋',
       tip: '足裏全体で踏むと膝だけに負担が寄りにくい。',
     }
   }
 
+  if (['レッグプレス', 'ハックスクワット'].includes(exerciseName)) {
+    return {
+      setup: 'マシンに体を預け、足裏全体でプレートを踏める位置に置く。',
+      cue: '深く曲げてから、足裏で押して戻る。',
+      equipment: '下半身マシン',
+      focus: '大腿四頭筋・臀筋',
+      tip: '腰が浮くほど深く入れすぎず、可動域を安定させる。',
+    }
+  }
+
+  if (exerciseName === 'ブルガリアンスクワット') {
+    return {
+      setup: '後ろ足をベンチへ乗せ、前脚に体重を乗せて立つ。',
+      cue: '真下へ沈み、前脚のかかとで床を押して戻る。',
+      equipment: 'ベンチ / ダンベル',
+      focus: '大腿四頭筋・臀筋',
+      tip: '前脚の膝が内へ入らない位置で繰り返す。',
+    }
+  }
+
+  if (['レッグエクステンション', 'カーフレイズ'].includes(exerciseName)) {
+    return {
+      setup: exerciseName === 'レッグエクステンション'
+        ? 'マシンに座って膝の軸とマシンの軸を合わせる。'
+        : '立つかマシンに乗り、つま先の真下に重心を置く。',
+      cue: '狙う筋肉で押し切り、戻しもゆっくりコントロールする。',
+      equipment: '下半身マシン / 自重',
+      focus: exerciseName === 'レッグエクステンション' ? '大腿四頭筋' : 'ふくらはぎ',
+      tip: '反動ではなく、トップと下ろしのコントロールで効かせる。',
+    }
+  }
+
   if (['ルーマニアンデッドリフト', 'ヒップスラスト', 'レッグカール'].includes(exerciseName)) {
     return {
+      setup:
+        exerciseName === 'ヒップスラスト'
+          ? 'ベンチに背中を預け、足裏を床につけて骨盤を正面へ向ける。'
+          : exerciseName === 'レッグカール'
+            ? 'マシンにうつ伏せまたは座って、膝の軸を合わせる。'
+            : '立って股関節から折れ、バーをももの前で持つ。',
       cue: 'お尻ともも裏を伸ばして戻す。',
       equipment: 'バーベル / マシン',
       focus: 'ハム・臀筋',
@@ -204,52 +363,96 @@ function getExerciseGuidanceSpec(exerciseName: string): {
     }
   }
 
-  if (['アームカール', 'ハンマーカール', 'プリーチャーカール', 'ケーブルカール', 'コンセントレーションカール'].includes(exerciseName)) {
+  if (['アームカール', 'ハンマーカール', 'ケーブルカール'].includes(exerciseName)) {
     return {
-      cue: '肘を固定して巻き上げる。',
-      equipment: 'ダンベル / ケーブル / EZバー',
+      setup: '立って肘を体の横へ固定し、手のひらを前か内側へ向けて構える。',
+      cue: '肘位置を保ったまま、前腕だけを巻き上げる。',
+      equipment: 'ダンベル / ケーブル',
       focus: '上腕二頭筋',
-      tip: '上体を振らずに行うと二頭筋だけで上げやすい。',
+      tip: '肩が前へ出ると二頭から負荷が抜けやすい。',
     }
   }
 
-  if (['トライセプスプレスダウン', 'フレンチプレス', 'ディップス', 'スカルクラッシャー'].includes(exerciseName)) {
+  if (['プリーチャーカール', 'コンセントレーションカール'].includes(exerciseName)) {
     return {
-      cue: '肘を伸ばして押し切る。',
-      equipment: 'ケーブル / ダンベル / 自重',
+      setup:
+        exerciseName === 'プリーチャーカール'
+          ? 'パッドに上腕を固定して座り、脇を浮かせないよう構える。'
+          : '座って肘を内ももへ当て、前腕が自由に動く姿勢を作る。',
+      cue: '上腕を固定したまま、前腕だけを丁寧に巻き上げる。',
+      equipment: 'ベンチ / パッド / ダンベル',
+      focus: '上腕二頭筋',
+      tip: '反動が使えないぶん、下ろしをゆっくり行うと効きやすい。',
+    }
+  }
+
+  if (['トライセプスプレスダウン', 'ディップス'].includes(exerciseName)) {
+    return {
+      setup:
+        exerciseName === 'トライセプスプレスダウン'
+          ? '立って肘を脇で固定し、バーやロープを胸の前で握る。'
+          : '平行バーに体を預け、肩をすくめず軽く前傾する。',
+      cue: '肘を支点にして押し切り、戻しも肘位置を変えずに行う。',
+      equipment: 'ケーブル / 自重',
       focus: '上腕三頭筋',
-      tip: '肘の位置を固定すると三頭筋に乗りやすい。',
+      tip: '肩ごと押し下げるのではなく、肘の曲げ伸ばしに集中する。',
+    }
+  }
+
+  if (['フレンチプレス', 'スカルクラッシャー'].includes(exerciseName)) {
+    return {
+      setup:
+        exerciseName === 'フレンチプレス'
+          ? '座るか立って、ダンベルを頭上に構えて肘を正面へ向ける。'
+          : 'ベンチに仰向けで寝て、バーやダンベルを胸の上に構える。',
+      cue: '上腕をなるべく固定し、肘の曲げ伸ばしだけで上げ下げする。',
+      equipment: 'ダンベル / EZバー / ベンチ',
+      focus: '上腕三頭筋',
+      tip: '肘が外へ開きすぎると肩や胸へ逃げやすい。',
     }
   }
 
   if (['クランチ', 'Vシットアップ', 'ケーブルクランチ'].includes(exerciseName)) {
     return {
-      cue: 'みぞおちを骨盤へ近づける。',
+      setup:
+        exerciseName === 'ケーブルクランチ'
+          ? 'ひざ立ちでロープを頭の横に構え、骨盤を軽く立てる。'
+          : '床かマットに仰向けで寝て、みぞおちを丸めやすい姿勢を作る。',
+      cue: 'みぞおちを骨盤へ近づけるように腹筋を縮める。',
       equipment: '自重 / ケーブル',
       focus: '腹直筋',
-      tip: '首を丸めるより、お腹を縮める感覚を優先する。',
+      tip: '首だけを曲げず、肋骨をたたむ意識で行う。',
     }
   }
 
   if (['レッグレイズ', 'ハンギングレッグレイズ'].includes(exerciseName)) {
     return {
-      cue: '骨盤を丸めながら脚を上げる。',
+      setup:
+        exerciseName === 'ハンギングレッグレイズ'
+          ? 'バーにぶら下がり、肩を下げて体を安定させる。'
+          : '床やベンチに仰向けで寝て、腰を浮かせない位置を作る。',
+      cue: '脚を上げるより、骨盤を丸めて下腹部を縮める。',
       equipment: 'バー / 自重',
       focus: '下腹部・腸腰筋',
-      tip: '脚を上げるより骨盤を巻き込むと腹に入りやすい。',
+      tip: '振り上げると腹から抜けるので、反動を抑えて行う。',
     }
   }
 
   if (['プランク', 'アブローラー', 'サイドプランク'].includes(exerciseName)) {
     return {
-      cue: '体幹を一直線に固め続ける。',
+      setup:
+        exerciseName === 'サイドプランク'
+          ? '横向きで前腕か手を床につき、体を一直線に持ち上げる。'
+          : 'うつ伏せ姿勢から前腕かローラーを床につき、体を一直線に保つ。',
+      cue: '体幹を一直線に固めたまま、腹圧を抜かずに支え続ける。',
       equipment: '自重 / ローラー',
       focus: '体幹全体',
-      tip: 'お腹とお尻を軽く締めると姿勢を保ちやすい。',
+      tip: '腰が落ちる前に止める方がフォームは安定する。',
     }
   }
 
   return {
+    setup: '座るか床に体を預け、体幹を安定させた姿勢から始める。',
     cue: '体幹を固定して左右へひねる。',
     equipment: '自重 / プレート',
     focus: '腹斜筋',
@@ -266,11 +469,12 @@ function splitExerciseInfo(text: string): { method: string; caution: string } {
 }
 
 function ExerciseTextGuide({ exerciseName }: { exerciseName: string }) {
-  const { cue, equipment, focus, tip } = getExerciseGuidanceSpec(exerciseName)
+  const { setup, cue, equipment, focus, tip } = getExerciseGuidanceSpec(exerciseName)
 
   return (
     <div className="exercise-guide-card">
       <div className="exercise-guide-meta">
+        <span className="guide-tag">姿勢: {setup}</span>
         <span className="guide-tag">狙い: {focus}</span>
         <span className="guide-tag">器具: {equipment}</span>
       </div>
@@ -729,6 +933,7 @@ function App() {
   )
   const wheelListRef = useRef<HTMLDivElement | null>(null)
   const wheelScrollTimerRef = useRef<number | null>(null)
+  const lastWheelHapticValueRef = useRef<number | null>(null)
   const pickerOpenValueRef = useRef(0)
   const toastTimerRef = useRef<number | null>(null)
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
@@ -756,9 +961,7 @@ function App() {
         if (previous <= 1) {
           window.clearInterval(timer)
           setTimerRunning(false)
-          if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-            navigator.vibrate([120, 80, 120])
-          }
+          triggerHaptic([120, 80, 120])
           return 0
         }
 
@@ -1125,26 +1328,60 @@ function App() {
     return filteredExercises.slice(0, 4)
   }, [filteredExercises])
 
-  const weeklyBodyPartFrequency = useMemo(() => {
-    const today = dayjs().startOf('day')
-    const frequencyMap = new Map<BodyPart, number>()
-    BODY_PARTS.forEach((part) => {
-      frequencyMap.set(part, 0)
+  const bodyPartReadiness = useMemo(() => {
+    const readinessMap = new Map<BodyPart, { label: string; tone: BodyPartBadgeTone }>()
+
+    daysSinceByBodyPart.forEach(({ part, days }) => {
+      if (days === 999) {
+        readinessMap.set(part, { label: '未実施', tone: 'new' })
+        return
+      }
+
+      if (days === 0) {
+        readinessMap.set(part, { label: '今日実施', tone: 'fresh' })
+        return
+      }
+
+      if (days >= 7) {
+        readinessMap.set(part, { label: '空き気味', tone: 'stale' })
+        return
+      }
+
+      if (days >= 4) {
+        readinessMap.set(part, { label: '今日おすすめ', tone: 'ready' })
+        return
+      }
+
+      readinessMap.set(part, { label: `${days}日休み`, tone: 'fresh' })
     })
 
-    sessions.forEach((session) => {
-      const sessionDay = dayjs(session.date).startOf('day')
-      const dayDiff = today.diff(sessionDay, 'day')
-      if (dayDiff < 0 || dayDiff >= 7) return
+    return readinessMap
+  }, [daysSinceByBodyPart])
 
-      const current = frequencyMap.get(session.bodyPart) ?? 0
-      frequencyMap.set(session.bodyPart, current + 1)
-    })
+  const hasWorkoutDraft = useMemo(() => {
+    return (
+      workoutPhase !== 'body' ||
+      sets.length !== 3 ||
+      sets.some((set, index) => {
+        const defaults = createDefaultSetsForExercise(selectedExercise)
+        const fallback = defaults[index]
+        return !fallback || set.weight !== fallback.weight || set.reps !== fallback.reps
+      })
+    )
+  }, [selectedExercise, sets, workoutPhase])
 
-    return frequencyMap
-  }, [sessions])
+  function vibrateAndSetTab(nextTab: AppTab, pattern: number | number[] = 12) {
+    if (nextTab !== tab) {
+      triggerHaptic(pattern)
+    }
+    setTab(nextTab)
+  }
 
   const selectedExerciseProfile = useMemo(() => getExerciseInputProfile(selectedExercise), [selectedExercise])
+  const selectedExerciseGuide = useMemo(
+    () => getExerciseGuidanceSpec(exerciseInfoTarget ?? selectedExercise),
+    [exerciseInfoTarget, selectedExercise],
+  )
 
   const selectedExerciseInfo = useMemo(() => {
     return splitExerciseInfo(EXERCISE_INFO[exerciseInfoTarget ?? ''] ?? '種目説明は準備中です。')
@@ -1248,6 +1485,7 @@ function App() {
 
   function addSet() {
     const profile = getExerciseInputProfile(selectedExercise)
+    resetCompleteConfirm()
     setSets((previous) => [
       ...previous,
       {
@@ -1259,10 +1497,12 @@ function App() {
   }
 
   function removeSet(setId: string) {
+    resetCompleteConfirm()
     setSets((previous) => previous.filter((set) => set.id !== setId))
   }
 
   function updateSet(setId: string, key: PickerTargetKey, value: number) {
+    resetCompleteConfirm()
     setSets((previous) => previous.map((set) => (set.id === setId ? { ...set, [key]: value } : set)))
   }
 
@@ -1303,6 +1543,7 @@ function App() {
   function openWheelPicker(setId: string, key: PickerTargetKey, currentValue: number) {
     const nextValue = getNearestOption(getPickerOptionsForExercise(selectedExercise, key), currentValue)
     pickerOpenValueRef.current = nextValue
+    lastWheelHapticValueRef.current = nextValue
     setPickerTarget({ setId, key })
     setPickerValue(nextValue)
   }
@@ -1342,10 +1583,12 @@ function App() {
       wheelScrollTimerRef.current = null
     }
     updateSet(pickerTarget.setId, pickerTarget.key, pickerValue)
+    triggerHaptic(18)
     setPickerTarget(null)
   }
 
   function adjustRestSeconds(delta: number) {
+    resetCompleteConfirm()
     setRestSeconds((previous) => {
       const nextRest = Math.min(600, Math.max(30, previous + delta))
       setExercisePreferredRestSeconds(selectedBodyPart, selectedExercise, nextRest)
@@ -1370,8 +1613,13 @@ function App() {
     setIsCompleteArmed(true)
   }
 
-  function startWorkoutFlow() {
-    setTab('workout')
+  function startWorkoutFlow(forceReset = false) {
+    if (!forceReset && hasWorkoutDraft) {
+      vibrateAndSetTab('workout', 18)
+      return
+    }
+
+    vibrateAndSetTab('workout', 18)
     setWorkoutPhase('body')
     setSets(createDefaultSetsForExercise(selectedExercise))
     setExerciseSearchQuery('')
@@ -1532,12 +1780,15 @@ function App() {
             {workoutPhase !== 'body' ? (
               <button
                 type="button"
-                onClick={() => setWorkoutPhase((previous) => (previous === 'record' ? 'exercise' : 'body'))}
+                onClick={() => {
+                  triggerHaptic(12)
+                  setWorkoutPhase((previous) => (previous === 'record' ? 'exercise' : 'body'))
+                }}
               >
                 戻る
               </button>
             ) : (
-              <button type="button" onClick={() => setTab('home')}>
+              <button type="button" onClick={() => vibrateAndSetTab('home', 12)}>
                 ホーム
               </button>
             )}
@@ -1561,11 +1812,13 @@ function App() {
                     onClick={() => {
                       setSelectedBodyPart(part)
                       setWorkoutPhase('exercise')
-                      navigator.vibrate?.(30)
+                      triggerHaptic(30)
                     }}
                   >
                     <span>{part}</span>
-                    <small className="freq-badge">{weeklyBodyPartFrequency.get(part) ?? 0}x</small>
+                    <small className={`body-badge tone-${bodyPartReadiness.get(part)?.tone ?? 'new'}`}>
+                      {bodyPartReadiness.get(part)?.label ?? '未実施'}
+                    </small>
                   </button>
                 ))}
               </div>
@@ -1585,7 +1838,10 @@ function App() {
                     key={exercise}
                     type="button"
                     className="chip-button"
-                    onClick={() => handleExerciseSelect(exercise)}
+                    onClick={() => {
+                      triggerHaptic(16)
+                      handleExerciseSelect(exercise)
+                    }}
                   >
                     {exercise}
                   </button>
@@ -1598,7 +1854,7 @@ function App() {
                       type="button"
                       onClick={() => {
                         handleExerciseSelect(exercise)
-                        navigator.vibrate?.(20)
+                        triggerHaptic(20)
                       }}
                     >
                       <span>{exercise}</span>
@@ -1608,7 +1864,14 @@ function App() {
                           : '前回記録なし'}
                       </small>
                     </button>
-                    <button type="button" className="info-btn" onClick={() => setExerciseInfoTarget(exercise)}>
+                    <button
+                      type="button"
+                      className="info-btn"
+                      onClick={() => {
+                        triggerHaptic(10)
+                        setExerciseInfoTarget(exercise)
+                      }}
+                    >
                       i
                     </button>
                   </div>
@@ -1637,71 +1900,122 @@ function App() {
                   {sets.map((set, index) => (
                     <div key={set.id} className="set-row set-row-compact">
                       <span>Set {index + 1}</span>
-                      <button type="button" onClick={() => openWheelPicker(set.id, 'weight', set.weight)}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic(10)
+                          openWheelPicker(set.id, 'weight', set.weight)
+                        }}
+                      >
                         {set.weight}kg
                       </button>
-                      <button type="button" onClick={() => openWheelPicker(set.id, 'reps', set.reps)}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic(10)
+                          openWheelPicker(set.id, 'reps', set.reps)
+                        }}
+                      >
                         {set.reps}回
                       </button>
-                      <button type="button" onClick={() => removeSet(set.id)} disabled={sets.length <= 1}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic(16)
+                          removeSet(set.id)
+                        }}
+                        disabled={sets.length <= 1}
+                      >
                         削除
                       </button>
                     </div>
                   ))}
                 </div>
               </div>
-              <div className={`action-row record-action-row ${isCompleteArmed ? 'is-confirming' : ''}`}>
-                <button type="button" onClick={addSet}>
+              <div className="action-row record-action-row">
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(18)
+                    addSet()
+                  }}
+                >
                   ＋セット追加
                 </button>
+              </div>
+              <div className={`action-row complete-action-row ${isCompleteArmed ? 'is-confirming' : ''}`}>
                 <button
                   type="button"
                   className={isCompleteArmed ? 'holding' : ''}
                   disabled={isSavingWorkout}
                   onClick={() => {
-                    navigator.vibrate?.(50)
+                    triggerHaptic(50)
                     handleCompleteAction()
                   }}
                 >
                   {isSavingWorkout ? '保存中...' : isCompleteArmed ? '保存する' : '完了'}
                 </button>
                 {isCompleteArmed && (
-                  <button type="button" onClick={resetCompleteConfirm} disabled={isSavingWorkout}>
-                    キャンセル
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic(12)
+                      resetCompleteConfirm()
+                    }}
+                    disabled={isSavingWorkout}
+                  >
+                    編集に戻る
                   </button>
                 )}
               </div>
+              {isCompleteArmed && <p className="complete-confirm-copy">この内容で保存して部位選択へ戻ります。</p>}
               <div className="timer">
                 <h3>休憩タイマー</h3>
                 <div className="timer-adjust">
-                  <button type="button" onClick={() => adjustRestSeconds(-15)} disabled={timerRunning}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic(10)
+                      adjustRestSeconds(-15)
+                    }}
+                    disabled={timerRunning}
+                  >
                     －
                   </button>
                   <p>
                     {String(Math.floor(restSeconds / 60)).padStart(2, '0')}:
                     {String(restSeconds % 60).padStart(2, '0')}
                   </p>
-                  <button type="button" onClick={() => adjustRestSeconds(15)} disabled={timerRunning}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic(10)
+                      adjustRestSeconds(15)
+                    }}
+                    disabled={timerRunning}
+                  >
                     ＋
                   </button>
                 </div>
                 <div className="action-row">
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      triggerHaptic(timerRunning ? 14 : 20)
                       setTimerRunning((previous) => {
                         if (!previous && restSeconds === 0) {
                           setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
                         }
                         return !previous
                       })
-                    }
+                    }}
                   >
                     {timerRunning ? 'STOP' : 'START'}
                   </button>
                   <button
                     type="button"
                     onClick={() => {
+                      triggerHaptic(12)
                       setTimerRunning(false)
                       setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
                     }}
@@ -1780,8 +2094,8 @@ function App() {
       )}
 
       {tab === 'home' && (
-        <button type="button" className="thumb-workout-cta" onClick={startWorkoutFlow}>
-          ワークアウト開始
+        <button type="button" className="thumb-workout-cta" onClick={() => startWorkoutFlow(false)}>
+          {hasWorkoutDraft ? 'ワークアウト再開' : 'ワークアウト開始'}
         </button>
       )}
 
@@ -1790,12 +2104,19 @@ function App() {
           <div className="overlay-card">
             <div className="row">
               <h3>{exerciseInfoTarget}</h3>
-              <button type="button" onClick={() => setExerciseInfoTarget(null)}>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(12)
+                  setExerciseInfoTarget(null)
+                }}
+              >
                 閉じる
               </button>
             </div>
             <ExerciseTextGuide exerciseName={exerciseInfoTarget} />
             <div className="info-copy">
+              <p><strong>姿勢</strong> {selectedExerciseGuide.setup}</p>
               <p><strong>やり方</strong> {selectedExerciseInfo.method}</p>
               {selectedExerciseInfo.caution && <p><strong>注意</strong> {selectedExerciseInfo.caution}</p>}
             </div>
@@ -1825,6 +2146,10 @@ function App() {
                     const nextValue = pickerOptions[clampedIndex]
                     if (typeof nextValue === 'number' && nextValue !== pickerValue) {
                       setPickerValue(nextValue)
+                      if (nextValue !== lastWheelHapticValueRef.current) {
+                        lastWheelHapticValueRef.current = nextValue
+                        triggerHaptic(10)
+                      }
                     }
                     if (wheelScrollTimerRef.current) {
                       window.clearTimeout(wheelScrollTimerRef.current)
@@ -1843,6 +2168,10 @@ function App() {
                       className={`wheel-item ${value === pickerValue ? 'selected' : ''}`}
                       onClick={() => {
                         setPickerValue(value)
+                        if (value !== lastWheelHapticValueRef.current) {
+                          lastWheelHapticValueRef.current = value
+                          triggerHaptic(10)
+                        }
                         scrollWheelToIndex(index, 'smooth')
                       }}
                     >
@@ -1861,6 +2190,7 @@ function App() {
               <button
                 type="button"
                 onClick={() => {
+                  triggerHaptic(12)
                   if (wheelScrollTimerRef.current) {
                     window.clearTimeout(wheelScrollTimerRef.current)
                     wheelScrollTimerRef.current = null
@@ -1878,29 +2208,33 @@ function App() {
       {showSavedToast && <div className="toast">保存しました</div>}
 
       <nav className="bottom-nav">
-        <button type="button" onClick={() => setTab('home')} className={tab === 'home' ? 'active' : ''}>
+        <button type="button" onClick={() => vibrateAndSetTab('home', 10)} className={tab === 'home' ? 'active' : ''}>
           ホーム
         </button>
         <button
           type="button"
-          onClick={startWorkoutFlow}
+          onClick={() => startWorkoutFlow(false)}
           className={tab === 'workout' ? 'active' : ''}
         >
           ワークアウト
         </button>
-        <button type="button" onClick={() => setTab('history')} className={tab === 'history' ? 'active' : ''}>
+        <button
+          type="button"
+          onClick={() => vibrateAndSetTab('history', 10)}
+          className={tab === 'history' ? 'active' : ''}
+        >
           履歴
         </button>
         <button
           type="button"
-          onClick={() => setTab('analytics')}
+          onClick={() => vibrateAndSetTab('analytics', 10)}
           className={tab === 'analytics' ? 'active' : ''}
         >
           分析
         </button>
         <button
           type="button"
-          onClick={() => setTab('settings')}
+          onClick={() => vibrateAndSetTab('settings', 10)}
           className={tab === 'settings' ? 'active' : ''}
         >
           設定
