@@ -1580,7 +1580,7 @@ function App() {
       .flatMap((exercise) => exercise.sets)
       .reduce((sum, set) => sum + set.weight * set.reps, 0)
     const restDays = dayjs().diff(dayjs(latest.date), 'day')
-    const highlights = latest.exercises.slice(0, 3).map((exercise) => {
+    const highlights = latest.exercises.slice(0, 2).map((exercise) => {
       const bestSet = exercise.sets.reduce((best, current) => {
         if (current.weight > best.weight) {
           return current
@@ -1634,6 +1634,17 @@ function App() {
   const previousExerciseSets = useMemo(() => {
     return latestExerciseSetHistory.get(getExerciseDraftKey(selectedBodyPart, selectedExercise)) ?? []
   }, [latestExerciseSetHistory, selectedBodyPart, selectedExercise])
+
+  const homeLastWorkoutVisibleHighlights = useMemo(
+    () => latestSessionSummary?.highlights.slice(0, 1) ?? [],
+    [latestSessionSummary],
+  )
+  const homeLastWorkoutHiddenCount = useMemo(() => {
+    if (!latestSessionSummary) {
+      return 0
+    }
+    return latestSessionSummary.exerciseCount - homeLastWorkoutVisibleHighlights.length
+  }, [homeLastWorkoutVisibleHighlights.length, latestSessionSummary])
 
   const exerciseUsageStats = useMemo(() => {
     const stats = new Map<string, { count: number; lastPerformed: number; bestWeight: number; bestReps: number }>()
@@ -2245,6 +2256,24 @@ function App() {
             </p>
           </section>
 
+          <button type="button" className="thumb-workout-cta" onClick={() => startWorkoutFlow(false)}>
+            {hasWorkoutDraft ? 'ワークアウト再開' : 'ワークアウト開始'}
+          </button>
+
+          <section className="home-kpi-inline">
+            <p className="kpi-chip">
+              <span className="kpi-label">前週比</span>
+              <strong className="kpi-value">{weeklyDeltaLabel}</strong>
+            </p>
+            <p className="kpi-chip">
+              <span className="kpi-label">連続日数</span>
+              <strong className="kpi-value">
+                {streakDays}
+                <small>日</small>
+              </strong>
+            </p>
+          </section>
+
           <section className="card home-graph-card">
             <div className="row">
               <h2>推定消費カロリー</h2>
@@ -2268,24 +2297,6 @@ function App() {
                 )
               })}
             </div>
-          </section>
-
-          <button type="button" className="thumb-workout-cta" onClick={() => startWorkoutFlow(false)}>
-            {hasWorkoutDraft ? 'ワークアウト再開' : 'ワークアウト開始'}
-          </button>
-
-          <section className="home-kpi-inline">
-            <p className="kpi-chip">
-              <span className="kpi-label">前週比</span>
-              <strong className="kpi-value">{weeklyDeltaLabel}</strong>
-            </p>
-            <p className="kpi-chip">
-              <span className="kpi-label">連続日数</span>
-              <strong className="kpi-value">
-                {streakDays}
-                <small>日</small>
-              </strong>
-            </p>
           </section>
 
           <section className="card home-last-workout-card">
@@ -2313,15 +2324,15 @@ function App() {
                   </p>
                 </div>
                 <div className="home-last-workout-lines">
-                  {latestSessionSummary.highlights.map((item) => (
+                  {homeLastWorkoutVisibleHighlights.map((item) => (
                     <p key={item.name}>
                       <span>{item.name}</span>
                       <strong>{item.bestSetLabel}</strong>
                       <small>{item.setCount}set</small>
                     </p>
                   ))}
-                  {latestSessionSummary.remainingExerciseCount > 0 && (
-                    <p className="home-last-workout-more">ほか {latestSessionSummary.remainingExerciseCount} 種目</p>
+                  {homeLastWorkoutHiddenCount > 0 && (
+                    <p className="home-last-workout-more">ほか {homeLastWorkoutHiddenCount} 種目</p>
                   )}
                 </div>
               </>

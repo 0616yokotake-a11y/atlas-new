@@ -886,20 +886,19 @@ button.secondary-btn {
 .home-single-screen {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .home-grid {
   display: flex;
   flex-direction: column;
-  align-content: start;
-  gap: 6px;
-  flex: 0 0 auto;
-  min-height: auto;
-  overflow: visible;
-  padding-bottom: 6px;
+  gap: 5px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
 }
 
 .home-grid .card {
@@ -913,8 +912,8 @@ button.secondary-btn {
 
 .home-last-workout-card {
   border-color: rgba(167, 139, 250, 0.28);
-  overflow: visible;
-  padding-bottom: 10px;
+  overflow: hidden;
+  padding-bottom: 7px;
 }
 
 .home-graph-card {
@@ -1475,9 +1474,9 @@ button.holding {
 }
 
 .home-last-workout-meta {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   color: #cbd5e1;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 .home-last-workout-kpi {
@@ -1488,7 +1487,7 @@ button.holding {
 
 .home-last-workout-kpi p {
   margin: 0;
-  padding: 6px 7px;
+  padding: 5px 6px;
   border-radius: 8px;
   border: 1px solid rgba(125, 211, 252, 0.24);
   background: rgba(30, 41, 59, 0.52);
@@ -1503,19 +1502,19 @@ button.holding {
 
 .home-last-workout-kpi strong {
   color: #eff6ff;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   line-height: 1.2;
 }
 
 .home-last-workout-lines {
-  margin-top: 8px;
+  margin-top: 6px;
   display: grid;
-  gap: 5px;
+  gap: 4px;
 }
 
 .home-last-workout-lines p {
   margin: 0;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.56);
   border: 1px solid rgba(125, 211, 252, 0.16);
@@ -1527,24 +1526,24 @@ button.holding {
 
 .home-last-workout-lines span {
   color: #dbeafe;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
 .home-last-workout-lines strong {
   color: #f8fafc;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 .home-last-workout-lines small {
   color: #94a3b8;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
 .home-last-workout-more {
   color: #93c5fd;
-  font-size: 0.74rem;
+  font-size: 0.7rem;
 }
 
 .home-last-workout-empty {
@@ -1556,15 +1555,15 @@ button.holding {
 .home-graph-card {
   display: grid;
   grid-template-rows: auto auto auto;
-  min-height: 178px;
-  overflow: visible;
-  padding-bottom: 8px;
+  min-height: 150px;
+  overflow: hidden;
+  padding-bottom: 5px;
 }
 
 .home-grid .mini-chart {
   height: auto;
-  min-height: 96px;
-  overflow: visible;
+  min-height: 78px;
+  overflow: hidden;
 }
 
 .home-kpi-inline {
@@ -1580,7 +1579,7 @@ button.holding {
   margin: 0;
   min-width: 0;
   min-height: 100%;
-  padding: 9px 10px;
+  padding: 7px 9px;
   border-radius: 10px;
   border: 1px solid rgba(125, 211, 252, 0.26);
   background:
@@ -1679,13 +1678,16 @@ button.holding {
   position: static;
   transform: none;
   width: 100%;
-  min-height: 84px;
+  min-height: 66px;
   border-radius: 999px;
-  font-size: 1.15rem;
+  font-size: 1.04rem;
   font-weight: 800;
   z-index: auto;
   margin: 0;
-  box-shadow: 0 16px 34px rgba(34, 211, 238, 0.42);
+  background:
+    linear-gradient(135deg, rgba(34, 211, 238, 0.84), rgba(99, 102, 241, 0.82)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0));
+  box-shadow: 0 8px 18px rgba(34, 211, 238, 0.2);
 }
 
 .thumb-workout-cta:hover,
@@ -1713,26 +1715,22 @@ button.holding {
     font-size: 1.95rem;
   }
 
-  .home-grid {
-    gap: 5px;
-  }
-
   .home-grid .card {
-    padding: 8px;
-    gap: 5px;
+    padding: 7px;
+    gap: 4px;
   }
 
   .home-grid .mini-chart {
-    min-height: 92px;
+    min-height: 72px;
   }
 
   .mini-bar-track {
-    height: 62px;
+    height: 54px;
   }
 
   .thumb-workout-cta {
-    min-height: 74px;
-    font-size: 1rem;
+    min-height: 60px;
+    font-size: 0.98rem;
   }
 
   .bottom-nav button {
@@ -1768,15 +1766,15 @@ button.holding {
   }
 
   .home-grid .mini-chart {
-    min-height: 84px;
+    min-height: 66px;
   }
 
   .mini-bar-track {
-    height: 56px;
+    height: 48px;
   }
 
   .thumb-workout-cta {
-    min-height: 68px;
+    min-height: 56px;
   }
 
   .home-kpi-inline { gap: 6px; }
