@@ -923,6 +923,7 @@ function App() {
   const [historySelectedDate, setHistorySelectedDate] = useState<string | null>(null)
   const [historyOpenDates, setHistoryOpenDates] = useState<string[]>([])
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState('')
+  const [customExerciseInput, setCustomExerciseInput] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
   const [aiFeedback, setAiFeedback] = useState<string[]>([])
@@ -995,6 +996,7 @@ function App() {
   useEffect(() => {
     if (tab !== 'workout') {
       resetCompleteConfirm()
+      setPickerTarget(null)
     }
   }, [tab])
 
@@ -1578,8 +1580,24 @@ function App() {
   const filteredExercises = useMemo(() => {
     const query = exerciseSearchQuery.trim()
     const baseExercises = EXERCISES_BY_BODY_PART[selectedBodyPart]
-    const originalIndex = new Map(baseExercises.map((exercise, index) => [exercise, index]))
-    const sortedExercises = [...baseExercises].sort((left, right) => {
+    const customExercises = Array.from(exerciseUsageStats.keys())
+      .filter((exercise) => !baseExercises.includes(exercise))
+      .sort((left, right) => {
+        const leftStat = exerciseUsageStats.get(left)
+        const rightStat = exerciseUsageStats.get(right)
+        const countDiff = (rightStat?.count ?? 0) - (leftStat?.count ?? 0)
+        if (countDiff !== 0) {
+          return countDiff
+        }
+        const timeDiff = (rightStat?.lastPerformed ?? 0) - (leftStat?.lastPerformed ?? 0)
+        if (timeDiff !== 0) {
+          return timeDiff
+        }
+        return left.localeCompare(right)
+      })
+    const allExercises = [...baseExercises, ...customExercises]
+    const originalIndex = new Map(allExercises.map((exercise, index) => [exercise, index]))
+    const sortedExercises = [...allExercises].sort((left, right) => {
       const leftStat = exerciseUsageStats.get(left)
       const rightStat = exerciseUsageStats.get(right)
       const countDiff = (rightStat?.count ?? 0) - (leftStat?.count ?? 0)
@@ -1816,6 +1834,16 @@ function App() {
     setTimerRunning(false)
     setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, exerciseName))
     resetCompleteConfirm()
+  }
+
+  function handleCustomExerciseSubmit() {
+    const name = customExerciseInput.trim()
+    if (!name) {
+      showToast('種目名を入力してください', 'error')
+      return
+    }
+    handleExerciseSelect(name)
+    setCustomExerciseInput('')
   }
 
   function openWheelPicker(setId: string, key: PickerTargetKey, currentValue: number) {
@@ -2128,7 +2156,6 @@ function App() {
                     <div className="mini-bar-track">
                       <div className="mini-bar" style={{ height: `${heightPercent}%` }} />
                     </div>
-                    <small className="mini-bar-value">{day.value > 0 ? day.value : '-'}</small>
                     <span>{day.label}</span>
                   </div>
                 )
@@ -2137,13 +2164,6 @@ function App() {
           </section>
 
           <section className="home-kpi-inline">
-            <p className="kpi-chip">
-              <span className="kpi-label">今週重量</span>
-              <strong className="kpi-value">
-                {weeklyTotalVolume.toLocaleString()}
-                <small>kg</small>
-              </strong>
-            </p>
             <p className="kpi-chip">
               <span className="kpi-label">前週比</span>
               <strong className="kpi-value">{weeklyDeltaLabel}</strong>
@@ -2226,6 +2246,23 @@ function App() {
                 onChange={(event) => setExerciseSearchQuery(event.target.value)}
                 placeholder="種目を検索"
               />
+              <div className="custom-exercise-row">
+                <input
+                  value={customExerciseInput}
+                  onChange={(event) => setCustomExerciseInput(event.target.value)}
+                  placeholder="自由入力で種目追加（例: ケーブルリアレイズ）"
+                />
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => {
+                    triggerHaptic(12)
+                    handleCustomExerciseSubmit()
+                  }}
+                >
+                  追加
+                </button>
+              </div>
               <div className="chip-row">
                 {popularExerciseChips.map((exercise) => (
                   <button
@@ -2412,7 +2449,7 @@ function App() {
       )}
 
       {tab === 'history' && (
-        <section className="card">
+        <section className="card history-screen-card">
           <h2>履歴</h2>
           <div className="history-calendar-card">
             <div className="history-calendar-header">
@@ -2760,7 +2797,7 @@ function App() {
 
       {pickerTarget && (
         <div className="overlay">
-          <div className="overlay-card">
+          <div className="overlay-card picker-overlay-card">
             <h3>{pickerTarget.key === 'weight' ? '重量を選択' : '回数を選択'}</h3>
             <p className="picker-meta">
               {pickerTarget.key === 'weight'

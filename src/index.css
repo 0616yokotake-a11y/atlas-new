@@ -55,7 +55,7 @@ body {
 }
 
 .app.has-fixed-nav {
-  padding-bottom: calc(108px + env(safe-area-inset-bottom));
+  padding-bottom: calc(132px + env(safe-area-inset-bottom));
 }
 
 .app.no-scroll {
@@ -761,37 +761,31 @@ button.secondary-btn {
 .mini-chart {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
+  gap: 5px;
   align-items: end;
-  min-height: 128px;
+  min-height: 96px;
   height: auto;
-  padding-bottom: 6px;
+  padding: 0 2px 2px;
 }
 
 .mini-chart-item {
   display: grid;
-  grid-template-rows: 1fr auto auto;
+  grid-template-rows: 1fr auto;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
 .mini-chart-item span {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: #93c5fd;
-  line-height: 1.15;
-}
-
-.mini-bar-value {
-  color: #cbd5e1;
-  font-size: 0.62rem;
-  line-height: 1;
+  line-height: 1.1;
 }
 
 .mini-bar-track {
   width: 100%;
-  max-width: 24px;
-  height: 82px;
+  max-width: 20px;
+  height: 68px;
   display: flex;
   align-items: flex-end;
   margin: 0 auto;
@@ -811,11 +805,6 @@ button.secondary-btn {
 }
 
 .mini-chart-item.active span {
-  color: #e0f2fe;
-  font-weight: 700;
-}
-
-.mini-chart-item.active .mini-bar-value {
   color: #e0f2fe;
   font-weight: 700;
 }
@@ -904,6 +893,7 @@ button.secondary-btn {
   overflow-y: auto;
   overflow-x: hidden;
   flex: 1;
+  -webkit-overflow-scrolling: touch;
 }
 
 .body-map {
@@ -1135,6 +1125,20 @@ button.secondary-btn {
   gap: 8px;
 }
 
+.picker-overlay-card {
+  max-height: calc(100svh - 24px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 12px;
+}
+
+.picker-overlay-card .action-row {
+  position: sticky;
+  bottom: 0;
+  padding-top: 8px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0), rgba(15, 23, 42, 0.95) 40%);
+}
+
 .exercise-guide-card {
   display: grid;
   gap: 8px;
@@ -1269,6 +1273,20 @@ button.secondary-btn {
   flex: 1;
   min-height: 0;
   overflow: visible;
+}
+
+.history-screen-card {
+  overflow: visible;
+}
+
+.custom-exercise-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
+.custom-exercise-row button {
+  min-width: 72px;
 }
 
 .record-set-list {
@@ -1462,15 +1480,14 @@ button.holding {
 .home-graph-card {
   display: grid;
   grid-template-rows: auto auto auto;
-  flex: 1;
-  min-height: 0;
+  min-height: 178px;
   overflow: hidden;
   padding-bottom: 8px;
 }
 
 .home-grid .mini-chart {
   height: auto;
-  min-height: 128px;
+  min-height: 96px;
   overflow: hidden;
 }
 
@@ -1630,11 +1647,11 @@ button.holding {
   }
 
   .home-grid .mini-chart {
-    min-height: 114px;
+    min-height: 92px;
   }
 
   .mini-bar-track {
-    height: 76px;
+    height: 62px;
   }
 
   .thumb-workout-cta {
@@ -1675,11 +1692,11 @@ button.holding {
   }
 
   .home-grid .mini-chart {
-    min-height: 104px;
+    min-height: 84px;
   }
 
   .mini-bar-track {
-    height: 68px;
+    height: 56px;
   }
 
   .thumb-workout-cta {
