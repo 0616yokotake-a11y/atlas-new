@@ -503,6 +503,12 @@ button:disabled {
   gap: 10px;
 }
 
+.history-bulk-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .history-delete-btn {
   min-height: 34px;
   padding: 0 12px;
@@ -512,10 +518,29 @@ button:disabled {
   box-shadow: none;
 }
 
+.history-delete-btn.disabled {
+  opacity: 0.55;
+}
+
 .history-delete-btn.danger {
   background: rgba(220, 38, 38, 0.2);
   border-color: rgba(252, 165, 165, 0.4);
   color: #fee2e2;
+}
+
+.history-select-btn {
+  min-height: 34px;
+  padding: 0 11px;
+  font-size: 0.75rem;
+  background: rgba(30, 41, 59, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  box-shadow: none;
+}
+
+.history-select-btn.selected {
+  background: rgba(8, 47, 73, 0.45);
+  border-color: rgba(125, 211, 252, 0.52);
+  color: #bae6fd;
 }
 
 .history-item p,

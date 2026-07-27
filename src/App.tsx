@@ -913,7 +913,8 @@ function App() {
   const [restSeconds, setRestSeconds] = useState(90)
   const [timerRunning, setTimerRunning] = useState(false)
   const [historyQuery, setHistoryQuery] = useState('')
-  const [historyDeleteTargetId, setHistoryDeleteTargetId] = useState<string | null>(null)
+  const [isHistorySelectionMode, setIsHistorySelectionMode] = useState(false)
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([])
   const [isDeletingHistory, setIsDeletingHistory] = useState(false)
   const [historyMonthCursor, setHistoryMonthCursor] = useState(() => dayjs().startOf('month').format('YYYY-MM-DD'))
   const [historySelectedDate, setHistorySelectedDate] = useState<string | null>(null)
@@ -996,7 +997,8 @@ function App() {
 
   useEffect(() => {
     if (tab !== 'history') {
-      setHistoryDeleteTargetId(null)
+      setIsHistorySelectionMode(false)
+      setSelectedHistoryIds([])
     }
   }, [tab])
 
@@ -1160,6 +1162,8 @@ function App() {
     })
   }, [historyMonth, historyQuery, historySelectedDate, sessions])
 
+  const visibleHistoryIds = useMemo(() => groupedHistory.map((session) => session.id), [groupedHistory])
+
   const historyDateSections = useMemo(() => {
     const sections = new Map<
       string,
@@ -1210,6 +1214,10 @@ function App() {
       return historyDateSections[0] ? [historyDateSections[0].date] : []
     })
   }, [historyDateSections, historySelectedDate])
+
+  useEffect(() => {
+    setSelectedHistoryIds((previous) => previous.filter((id) => visibleHistoryIds.includes(id)))
+  }, [visibleHistoryIds])
 
   const daysSinceByBodyPart = useMemo(() => {
     const today = dayjs()
@@ -1775,7 +1783,7 @@ function App() {
     resetCompleteConfirm()
   }
 
-  async function handleDeleteHistorySession(sessionId: string) {
+  async function handleDeleteHistorySessions(sessionIds: string[]) {
     if (isDeletingHistory) {
       return
     }
@@ -1783,15 +1791,18 @@ function App() {
     setIsDeletingHistory(true)
     try {
       if (db && user && !isDemoMode) {
-        await removeSession(db, user.uid, sessionId)
+        const dbRef = db
+        const uid = user.uid
+        await Promise.all(sessionIds.map((sessionId) => removeSession(dbRef, uid, sessionId)))
         setSyncStatus('クラウド同期済み')
       } else {
-        deleteSessionFromStore(sessionId)
+        sessionIds.forEach((sessionId) => deleteSessionFromStore(sessionId))
         setSyncStatus('ローカル保存')
       }
 
-      setHistoryDeleteTargetId(null)
-      showToast('履歴を削除しました')
+      setSelectedHistoryIds([])
+      setIsHistorySelectionMode(false)
+      showToast(`${sessionIds.length}件の履歴を削除しました`)
       setAuthError(null)
     } catch (error) {
       setSyncStatus('同期エラー')
@@ -2279,6 +2290,57 @@ function App() {
             onChange={(e) => setHistoryQuery(e.target.value)}
             placeholder="日付 / 部位 / 種目で検索"
           />
+          <div className="history-bulk-actions">
+            {!isHistorySelectionMode ? (
+              <button
+                type="button"
+                className="history-delete-btn"
+                onClick={() => {
+                  triggerHaptic(12)
+                  setIsHistorySelectionMode(true)
+                }}
+              >
+                複数選択削除
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="history-delete-btn"
+                  onClick={() => {
+                    triggerHaptic(10)
+                    setSelectedHistoryIds((previous) =>
+                      previous.length === visibleHistoryIds.length ? [] : [...visibleHistoryIds],
+                    )
+                  }}
+                >
+                  {selectedHistoryIds.length === visibleHistoryIds.length ? '全解除' : '全選択'}
+                </button>
+                <button
+                  type="button"
+                  className={`history-delete-btn danger ${selectedHistoryIds.length === 0 ? 'disabled' : ''}`}
+                  disabled={selectedHistoryIds.length === 0 || isDeletingHistory}
+                  onClick={() => {
+                    triggerHaptic(20)
+                    void handleDeleteHistorySessions(selectedHistoryIds)
+                  }}
+                >
+                  {isDeletingHistory ? '削除中...' : `${selectedHistoryIds.length}件削除`}
+                </button>
+                <button
+                  type="button"
+                  className="history-delete-btn"
+                  onClick={() => {
+                    triggerHaptic(10)
+                    setIsHistorySelectionMode(false)
+                    setSelectedHistoryIds([])
+                  }}
+                >
+                  キャンセル
+                </button>
+              </>
+            )}
+          </div>
           {historyDateSections.map((section) => {
             const isOpen = historyOpenDates.includes(section.date)
             return (
@@ -2306,21 +2368,21 @@ function App() {
                     <article key={session.id} className="history-item">
                       <div className="history-item-head">
                         <strong>{session.bodyPart}</strong>
-                        <button
-                          type="button"
-                          className={`history-delete-btn ${historyDeleteTargetId === session.id ? 'danger' : ''}`}
-                          disabled={isDeletingHistory}
-                          onClick={() => {
-                            if (historyDeleteTargetId === session.id) {
-                              void handleDeleteHistorySession(session.id)
-                              return
-                            }
-
-                            setHistoryDeleteTargetId(session.id)
-                          }}
-                        >
-                          {historyDeleteTargetId === session.id ? '削除する' : '削除'}
-                        </button>
+                        {isHistorySelectionMode && (
+                          <button
+                            type="button"
+                            className={`history-select-btn ${selectedHistoryIds.includes(session.id) ? 'selected' : ''}`}
+                            onClick={() => {
+                              setSelectedHistoryIds((previous) =>
+                                previous.includes(session.id)
+                                  ? previous.filter((id) => id !== session.id)
+                                  : [...previous, session.id],
+                              )
+                            }}
+                          >
+                            {selectedHistoryIds.includes(session.id) ? '選択中' : '選択'}
+                          </button>
+                        )}
                       </div>
                       {session.exercises.map((exercise) => (
                         <p key={exercise.id}>
