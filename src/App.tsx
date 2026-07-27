@@ -51,6 +51,9 @@ const WHEEL_VISIBLE_ROWS = 5
 const WHEEL_SIDE_PADDING = ((WHEEL_VISIBLE_ROWS - 1) / 2) * WHEEL_ITEM_HEIGHT
 const EXERCISE_PREFERENCES_STORAGE_KEY = 'atlas.exercise-preferences.v1'
 const EXERCISE_NOTES_STORAGE_KEY = 'atlas.exercise-notes.v1'
+const PRESET_EXERCISE_NAMES = new Set(
+  BODY_PARTS.flatMap((bodyPart) => EXERCISES_BY_BODY_PART[bodyPart]),
+)
 
 function triggerHaptic(pattern: number | number[]) {
   if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
@@ -1744,6 +1747,10 @@ function App() {
   }
 
   const selectedExerciseProfile = useMemo(() => getExerciseInputProfile(selectedExercise), [selectedExercise])
+  const isCustomExerciseInfoTarget = useMemo(
+    () => (exerciseInfoTarget ? !PRESET_EXERCISE_NAMES.has(exerciseInfoTarget) : false),
+    [exerciseInfoTarget],
+  )
   const selectedExerciseGuide = useMemo(
     () => getExerciseGuidanceSpec(exerciseInfoTarget ?? selectedExercise),
     [exerciseInfoTarget, selectedExercise],
@@ -2847,12 +2854,20 @@ function App() {
                 閉じる
               </button>
             </div>
-            <ExerciseTextGuide exerciseName={exerciseInfoTarget} />
-            <div className="info-copy">
-              <p><strong>姿勢</strong> {selectedExerciseGuide.setup}</p>
-              <p><strong>やり方</strong> {selectedExerciseInfo.method}</p>
-              {selectedExerciseInfo.caution && <p><strong>注意</strong> {selectedExerciseInfo.caution}</p>}
-            </div>
+            {isCustomExerciseInfoTarget ? (
+              <p className="home-last-workout-empty">
+                この自由入力種目はユーザーメモのみ表示します。
+              </p>
+            ) : (
+              <>
+                <ExerciseTextGuide exerciseName={exerciseInfoTarget} />
+                <div className="info-copy">
+                  <p><strong>姿勢</strong> {selectedExerciseGuide.setup}</p>
+                  <p><strong>やり方</strong> {selectedExerciseInfo.method}</p>
+                  {selectedExerciseInfo.caution && <p><strong>注意</strong> {selectedExerciseInfo.caution}</p>}
+                </div>
+              </>
+            )}
             <div className="exercise-note-editor">
               <label>
                 ユーザーメモ

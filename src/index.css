@@ -843,6 +843,7 @@ button.secondary-btn {
   flex-direction: column;
   gap: 6px;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .home-grid {
@@ -850,10 +851,10 @@ button.secondary-btn {
   flex-direction: column;
   align-content: start;
   gap: 6px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-bottom: 4px;
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow: visible;
+  padding-bottom: 6px;
 }
 
 .home-grid .card {
@@ -867,6 +868,8 @@ button.secondary-btn {
 
 .home-last-workout-card {
   border-color: rgba(167, 139, 250, 0.28);
+  overflow: visible;
+  padding-bottom: 10px;
 }
 
 .home-graph-card {
