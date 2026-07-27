@@ -1350,6 +1350,35 @@ function App() {
     return `${rounded >= 0 ? '+' : ''}${rounded}%`
   }, [previousWeeklyTotalVolume, weeklyTotalVolume])
 
+  const weeklyIntensityTrendLabel = useMemo(() => {
+    const now = dayjs()
+    const buildAverage = (minDayDiff: number, maxDayDiff: number) => {
+      const targetSets = sessions
+        .filter((session) => {
+          const diff = now.diff(dayjs(session.date), 'day')
+          return diff >= minDayDiff && diff < maxDayDiff
+        })
+        .flatMap((session) => session.exercises)
+        .flatMap((exercise) => exercise.sets)
+
+      if (targetSets.length === 0) {
+        return 0
+      }
+
+      const sum = targetSets.reduce((total, set) => total + set.weight * set.reps, 0)
+      return sum / targetSets.length
+    }
+
+    const currentAverage = buildAverage(0, 7)
+    const previousAverage = buildAverage(7, 14)
+    if (previousAverage === 0) {
+      return currentAverage > 0 ? 'NEW' : '0%'
+    }
+    const delta = ((currentAverage - previousAverage) / previousAverage) * 100
+    const rounded = Math.round(delta)
+    return `${rounded >= 0 ? '+' : ''}${rounded}%`
+  }, [sessions])
+
   const weeklyCalories = useMemo(() => {
     const dayLabels = ['日', '月', '火', '水', '木', '金', '土']
     const today = dayjs().startOf('day')
@@ -1474,43 +1503,6 @@ function App() {
       highlights,
       remainingExerciseCount: Math.max(0, latest.exercises.length - highlights.length),
     }
-  }, [sessions])
-
-  const streakDays = useMemo(() => {
-    if (sessions.length === 0) {
-      return 0
-    }
-
-    const dateSet = new Set(sessions.map((session) => dayjs(session.date).format('YYYY-MM-DD')))
-    let cursor = dayjs().startOf('day')
-    if (!dateSet.has(cursor.format('YYYY-MM-DD'))) {
-      cursor = cursor.subtract(1, 'day')
-    }
-
-    let streak = 0
-    while (dateSet.has(cursor.format('YYYY-MM-DD'))) {
-      streak += 1
-      cursor = cursor.subtract(1, 'day')
-    }
-
-    return streak
-  }, [sessions])
-
-  const bodyBalanceIndex = useMemo(() => {
-    const now = dayjs()
-    const counts = BODY_PARTS.map(
-      (part) =>
-        sessions.filter((session) => session.bodyPart === part && now.diff(dayjs(session.date), 'day') < 7).length,
-    )
-    const total = counts.reduce((sum, count) => sum + count, 0)
-    if (total === 0) {
-      return 0
-    }
-
-    const probabilities = counts.filter((count) => count > 0).map((count) => count / total)
-    const entropy = probabilities.reduce((sum, p) => sum - p * Math.log(p), 0)
-    const maxEntropy = Math.log(BODY_PARTS.length)
-    return Math.round((entropy / maxEntropy) * 100)
   }, [sessions])
 
   const latestExerciseSetHistory = useMemo(() => {
@@ -2161,18 +2153,8 @@ function App() {
               <strong className="kpi-value">{weeklyDeltaLabel}</strong>
             </p>
             <p className="kpi-chip">
-              <span className="kpi-label">連続</span>
-              <strong className="kpi-value">
-                {streakDays}
-                <small>日</small>
-              </strong>
-            </p>
-            <p className="kpi-chip">
-              <span className="kpi-label">バランス</span>
-              <strong className="kpi-value">
-                {bodyBalanceIndex}
-                <small>pt</small>
-              </strong>
+              <span className="kpi-label">強度推移</span>
+              <strong className="kpi-value">{weeklyIntensityTrendLabel}</strong>
             </p>
           </section>
         </section>
