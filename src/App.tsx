@@ -50,6 +50,7 @@ const WHEEL_ITEM_HEIGHT = 54
 const WHEEL_VISIBLE_ROWS = 5
 const WHEEL_SIDE_PADDING = ((WHEEL_VISIBLE_ROWS - 1) / 2) * WHEEL_ITEM_HEIGHT
 const EXERCISE_PREFERENCES_STORAGE_KEY = 'atlas.exercise-preferences.v1'
+const EXERCISE_NOTES_STORAGE_KEY = 'atlas.exercise-notes.v1'
 
 function triggerHaptic(pattern: number | number[]) {
   if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
@@ -700,6 +701,26 @@ function loadExercisePreferences(): Record<string, ExercisePreference> {
   }
 }
 
+function loadExerciseNotes(): Record<string, string> {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+
+  const raw = window.localStorage.getItem(EXERCISE_NOTES_STORAGE_KEY)
+  if (!raw) {
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, string>
+    return parsed ?? {}
+  } catch (error) {
+    console.error('Failed to load exercise notes', error)
+    window.localStorage.removeItem(EXERCISE_NOTES_STORAGE_KEY)
+    return {}
+  }
+}
+
 function createSession(bodyPart: BodyPart, exerciseName: string, sets: ExerciseSet[]): WorkoutSession {
   return {
     id: crypto.randomUUID(),
@@ -923,6 +944,8 @@ function App() {
   const [historyOpenDates, setHistoryOpenDates] = useState<string[]>([])
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState('')
   const [customExerciseInput, setCustomExerciseInput] = useState('')
+  const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>(loadExerciseNotes)
+  const [exerciseNoteDraft, setExerciseNoteDraft] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
   const [aiFeedback, setAiFeedback] = useState<string[]>([])
@@ -1026,6 +1049,22 @@ function App() {
 
     window.localStorage.setItem(EXERCISE_PREFERENCES_STORAGE_KEY, JSON.stringify(exercisePreferences))
   }, [exercisePreferences])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(EXERCISE_NOTES_STORAGE_KEY, JSON.stringify(exerciseNotes))
+  }, [exerciseNotes])
+
+  useEffect(() => {
+    if (!exerciseInfoTarget) {
+      setExerciseNoteDraft('')
+      return
+    }
+    setExerciseNoteDraft(exerciseNotes[exerciseInfoTarget] ?? '')
+  }, [exerciseInfoTarget, exerciseNotes])
 
   useEffect(() => {
     if (workoutPhase !== 'record') {
@@ -1451,7 +1490,7 @@ function App() {
         const sessionCalories = Math.max(
           35,
           Math.min(
-            180,
+            420,
             Math.round(((met * 3.5 * assumedBodyWeightKg) / 200) * estimatedMinutes),
           ),
         )
@@ -1460,7 +1499,7 @@ function App() {
 
       return {
         label,
-        value: Math.min(320, value),
+        value: Math.min(1200, value),
       }
     })
     const total = caloriesByDay.reduce((sum, day) => sum + day.value, 0)
@@ -1569,28 +1608,42 @@ function App() {
   }, [latestExerciseSetHistory, selectedBodyPart, selectedExercise])
 
   const exerciseUsageStats = useMemo(() => {
-    const stats = new Map<string, { count: number; lastPerformed: number; latestSetLine: string }>()
+    const stats = new Map<string, { count: number; lastPerformed: number; bestWeight: number; bestReps: number }>()
 
     sessions
       .filter((session) => session.bodyPart === selectedBodyPart)
       .forEach((session) => {
         const performedAt = dayjs(session.date).valueOf()
         session.exercises.forEach((exercise) => {
-          const latestSetLine = exercise.sets.map((set) => `${set.weight}kg×${set.reps}`).join(' / ')
+          const sessionBestSet = exercise.sets.reduce((best, set) => {
+            if (set.weight > best.weight) {
+              return set
+            }
+            if (set.weight === best.weight && set.reps > best.reps) {
+              return set
+            }
+            return best
+          }, exercise.sets[0])
           const current = stats.get(exercise.name)
           if (!current) {
             stats.set(exercise.name, {
               count: 1,
               lastPerformed: performedAt,
-              latestSetLine,
+              bestWeight: sessionBestSet.weight,
+              bestReps: sessionBestSet.reps,
             })
             return
           }
 
+          const hasNewBest =
+            sessionBestSet.weight > current.bestWeight ||
+            (sessionBestSet.weight === current.bestWeight && sessionBestSet.reps > current.bestReps)
+
           stats.set(exercise.name, {
             count: current.count + 1,
             lastPerformed: Math.max(current.lastPerformed, performedAt),
-            latestSetLine: current.lastPerformed >= performedAt ? current.latestSetLine : latestSetLine,
+            bestWeight: hasNewBest ? sessionBestSet.weight : current.bestWeight,
+            bestReps: hasNewBest ? sessionBestSet.reps : current.bestReps,
           })
         })
       })
@@ -2304,9 +2357,9 @@ function App() {
                     >
                       <span>{exercise}</span>
                       <small className="previous-record">
-                        {exerciseUsageStats.get(exercise)?.latestSetLine
-                          ? `${exerciseUsageStats.get(exercise)?.latestSetLine}`
-                          : '前回記録なし'}
+                        {exerciseUsageStats.get(exercise)
+                          ? `${exerciseUsageStats.get(exercise)?.bestWeight}kg×${exerciseUsageStats.get(exercise)?.bestReps}`
+                          : '最高記録なし'}
                       </small>
                     </button>
                     <button
@@ -2799,6 +2852,39 @@ function App() {
               <p><strong>姿勢</strong> {selectedExerciseGuide.setup}</p>
               <p><strong>やり方</strong> {selectedExerciseInfo.method}</p>
               {selectedExerciseInfo.caution && <p><strong>注意</strong> {selectedExerciseInfo.caution}</p>}
+            </div>
+            <div className="exercise-note-editor">
+              <label>
+                ユーザーメモ
+                <textarea
+                  value={exerciseNoteDraft}
+                  onChange={(event) => setExerciseNoteDraft(event.target.value)}
+                  placeholder="フォームのコツや注意点をメモ"
+                />
+              </label>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => {
+                  if (!exerciseInfoTarget) {
+                    return
+                  }
+                  const trimmedNote = exerciseNoteDraft.trim()
+                  setExerciseNotes((previous) => {
+                    const next = { ...previous }
+                    if (trimmedNote) {
+                      next[exerciseInfoTarget] = trimmedNote
+                    } else {
+                      delete next[exerciseInfoTarget]
+                    }
+                    return next
+                  })
+                  showToast(trimmedNote ? 'メモを保存しました' : 'メモを削除しました')
+                  triggerHaptic(12)
+                }}
+              >
+                メモ保存
+              </button>
             </div>
           </div>
         </div>
