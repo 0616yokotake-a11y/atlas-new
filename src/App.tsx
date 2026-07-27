@@ -1379,6 +1379,43 @@ function App() {
     return `${rounded >= 0 ? '+' : ''}${rounded}%`
   }, [sessions])
 
+  const streakDays = useMemo(() => {
+    if (sessions.length === 0) {
+      return 0
+    }
+
+    const dateSet = new Set(sessions.map((session) => dayjs(session.date).format('YYYY-MM-DD')))
+    let cursor = dayjs().startOf('day')
+    if (!dateSet.has(cursor.format('YYYY-MM-DD'))) {
+      cursor = cursor.subtract(1, 'day')
+    }
+
+    let streak = 0
+    while (dateSet.has(cursor.format('YYYY-MM-DD'))) {
+      streak += 1
+      cursor = cursor.subtract(1, 'day')
+    }
+
+    return streak
+  }, [sessions])
+
+  const bodyBalanceIndex = useMemo(() => {
+    const now = dayjs()
+    const counts = BODY_PARTS.map(
+      (part) =>
+        sessions.filter((session) => session.bodyPart === part && now.diff(dayjs(session.date), 'day') < 7).length,
+    )
+    const total = counts.reduce((sum, count) => sum + count, 0)
+    if (total === 0) {
+      return 0
+    }
+
+    const probabilities = counts.filter((count) => count > 0).map((count) => count / total)
+    const entropy = probabilities.reduce((sum, p) => sum - p * Math.log(p), 0)
+    const maxEntropy = Math.log(BODY_PARTS.length)
+    return Math.round((entropy / maxEntropy) * 100)
+  }, [sessions])
+
   const weeklyCalories = useMemo(() => {
     const dayLabels = ['日', '月', '火', '水', '木', '金', '土']
     const today = dayjs().startOf('day')
@@ -1603,10 +1640,6 @@ function App() {
 
     return sortedExercises.filter((exercise) => exercise.includes(query))
   }, [exerciseSearchQuery, exerciseUsageStats, selectedBodyPart])
-
-  const popularExerciseChips = useMemo(() => {
-    return filteredExercises.slice(0, 4)
-  }, [filteredExercises])
 
   const bodyPartReadiness = useMemo(() => {
     const readinessMap = new Map<BodyPart, { label: string; tone: BodyPartBadgeTone }>()
@@ -2153,6 +2186,20 @@ function App() {
               <strong className="kpi-value">{weeklyDeltaLabel}</strong>
             </p>
             <p className="kpi-chip">
+              <span className="kpi-label">連続</span>
+              <strong className="kpi-value">
+                {streakDays}
+                <small>日</small>
+              </strong>
+            </p>
+            <p className="kpi-chip">
+              <span className="kpi-label">部位バランス</span>
+              <strong className="kpi-value">
+                {bodyBalanceIndex}
+                <small>pt</small>
+              </strong>
+            </p>
+            <p className="kpi-chip">
               <span className="kpi-label">強度推移</span>
               <strong className="kpi-value">{weeklyIntensityTrendLabel}</strong>
             </p>
@@ -2236,21 +2283,6 @@ function App() {
                 >
                   追加
                 </button>
-              </div>
-              <div className="chip-row">
-                {popularExerciseChips.map((exercise) => (
-                  <button
-                    key={exercise}
-                    type="button"
-                    className="chip-button"
-                    onClick={() => {
-                      triggerHaptic(16)
-                      handleExerciseSelect(exercise)
-                    }}
-                  >
-                    {exercise}
-                  </button>
-                ))}
               </div>
               <div className="exercise-list">
                 {filteredExercises.map((exercise) => (
