@@ -1964,26 +1964,34 @@ function App() {
 
     setIsDeletingHistory(true)
     try {
-      if (db && user && !isDemoMode) {
-        const dbRef = db
-        const uid = user.uid
-        await Promise.all(sessionIds.map((sessionId) => removeSession(dbRef, uid, sessionId)))
-        setSyncStatus('クラウド同期済み')
-      } else {
-        sessionIds.forEach((sessionId) => deleteSessionFromStore(sessionId))
-        setSyncStatus('ローカル保存')
-      }
-
+      sessionIds.forEach((sessionId) => deleteSessionFromStore(sessionId))
       setSelectedHistoryIds([])
       setIsHistorySelectionMode(false)
       setIsHistoryDeleteConfirming(false)
       showToast(`${sessionIds.length}件の履歴を削除しました`)
       setAuthError(null)
+      setIsDeletingHistory(false)
+
+      if (db && user && !isDemoMode) {
+        const dbRef = db
+        const uid = user.uid
+        setSyncStatus('クラウド同期中...')
+        void Promise.all(sessionIds.map((sessionId) => removeSession(dbRef, uid, sessionId)))
+          .then(() => {
+            setSyncStatus('クラウド同期済み')
+          })
+          .catch((error) => {
+            setSyncStatus('同期エラー')
+            setAuthError(error instanceof Error ? error.message : '履歴削除の同期に失敗しました。')
+            showToast('履歴は削除済み / 同期エラー', 'error')
+          })
+      } else {
+        setSyncStatus('ローカル保存')
+      }
     } catch (error) {
       setSyncStatus('同期エラー')
       setAuthError(error instanceof Error ? error.message : '履歴削除に失敗しました。')
       showToast('履歴削除に失敗しました', 'error')
-    } finally {
       setIsDeletingHistory(false)
     }
   }
