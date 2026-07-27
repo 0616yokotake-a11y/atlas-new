@@ -46,8 +46,8 @@ body {
   overflow-x: hidden;
   overflow-y: hidden;
   background:
-    radial-gradient(1000px 400px at 10% -10%, rgba(34, 211, 238, 0.25), transparent 60%),
-    radial-gradient(1000px 400px at 90% -20%, rgba(167, 139, 250, 0.28), transparent 60%),
+    radial-gradient(1200px 520px at 8% -12%, rgba(34, 211, 238, 0.16), transparent 74%),
+    radial-gradient(1300px 540px at 95% -24%, rgba(56, 189, 248, 0.12), transparent 78%),
     linear-gradient(180deg, #020617 0%, #020617 100%);
 }
 
@@ -1014,7 +1014,12 @@ button.secondary-btn {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding-bottom: 0;
+  padding-right: 2px;
+  padding-bottom: 2px;
+}
+
+.exercise-step {
+  overflow: hidden;
 }
 
 .exercise-step input {
@@ -1078,8 +1083,8 @@ button.secondary-btn {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px;
-  flex: 1;
-  min-height: 0;
+  flex: 0 0 auto;
+  min-height: 62px;
 }
 
 .exercise-item button:first-child {
@@ -1090,7 +1095,7 @@ button.secondary-btn {
   gap: 4px;
   text-align: left;
   padding-inline: 12px;
-  min-height: 100%;
+  min-height: 62px;
   font-size: 1rem;
 }
 
@@ -1568,8 +1573,8 @@ button.holding {
   place-items: center;
   padding: 20px;
   background:
-    radial-gradient(1000px 400px at 10% -10%, rgba(34, 211, 238, 0.25), transparent 60%),
-    radial-gradient(1000px 400px at 90% -20%, rgba(167, 139, 250, 0.28), transparent 60%),
+    radial-gradient(1200px 520px at 8% -12%, rgba(34, 211, 238, 0.16), transparent 74%),
+    radial-gradient(1300px 540px at 95% -24%, rgba(56, 189, 248, 0.12), transparent 78%),
     linear-gradient(180deg, #020617 0%, #020617 100%);
 }
 

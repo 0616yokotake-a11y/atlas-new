@@ -51,6 +51,7 @@ const WHEEL_VISIBLE_ROWS = 5
 const WHEEL_SIDE_PADDING = ((WHEEL_VISIBLE_ROWS - 1) / 2) * WHEEL_ITEM_HEIGHT
 const EXERCISE_PREFERENCES_STORAGE_KEY = 'atlas.exercise-preferences.v1'
 const EXERCISE_NOTES_STORAGE_KEY = 'atlas.exercise-notes.v1'
+const CUSTOM_EXERCISES_STORAGE_KEY = 'atlas.custom-exercises.v1'
 const PRESET_EXERCISE_NAMES = new Set(
   BODY_PARTS.flatMap((bodyPart) => EXERCISES_BY_BODY_PART[bodyPart]),
 )
@@ -724,6 +725,47 @@ function loadExerciseNotes(): Record<string, string> {
   }
 }
 
+function createEmptyCustomExercisesByBodyPart(): Record<BodyPart, string[]> {
+  return BODY_PARTS.reduce((accumulator, part) => {
+    accumulator[part] = []
+    return accumulator
+  }, {} as Record<BodyPart, string[]>)
+}
+
+function loadCustomExercisesByBodyPart(): Record<BodyPart, string[]> {
+  if (typeof window === 'undefined') {
+    return createEmptyCustomExercisesByBodyPart()
+  }
+
+  const raw = window.localStorage.getItem(CUSTOM_EXERCISES_STORAGE_KEY)
+  if (!raw) {
+    return createEmptyCustomExercisesByBodyPart()
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<Record<BodyPart, string[]>>
+    const next = createEmptyCustomExercisesByBodyPart()
+    BODY_PARTS.forEach((part) => {
+      const entries = parsed[part]
+      if (!Array.isArray(entries)) {
+        return
+      }
+      next[part] = Array.from(
+        new Set(
+          entries
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0),
+        ),
+      )
+    })
+    return next
+  } catch (error) {
+    console.error('Failed to load custom exercises', error)
+    window.localStorage.removeItem(CUSTOM_EXERCISES_STORAGE_KEY)
+    return createEmptyCustomExercisesByBodyPart()
+  }
+}
+
 function createSession(bodyPart: BodyPart, exerciseName: string, sets: ExerciseSet[]): WorkoutSession {
   return {
     id: crypto.randomUUID(),
@@ -947,6 +989,9 @@ function App() {
   const [historyOpenDates, setHistoryOpenDates] = useState<string[]>([])
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState('')
   const [customExerciseInput, setCustomExerciseInput] = useState('')
+  const [customExercisesByBodyPart, setCustomExercisesByBodyPart] = useState<
+    Record<BodyPart, string[]>
+  >(loadCustomExercisesByBodyPart)
   const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>(loadExerciseNotes)
   const [exerciseNoteDraft, setExerciseNoteDraft] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
@@ -1060,6 +1105,14 @@ function App() {
 
     window.localStorage.setItem(EXERCISE_NOTES_STORAGE_KEY, JSON.stringify(exerciseNotes))
   }, [exerciseNotes])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(CUSTOM_EXERCISES_STORAGE_KEY, JSON.stringify(customExercisesByBodyPart))
+  }, [customExercisesByBodyPart])
 
   useEffect(() => {
     if (!exerciseInfoTarget) {
@@ -1657,8 +1710,12 @@ function App() {
   const filteredExercises = useMemo(() => {
     const query = exerciseSearchQuery.trim()
     const baseExercises = EXERCISES_BY_BODY_PART[selectedBodyPart]
-    const customExercises = Array.from(exerciseUsageStats.keys())
-      .filter((exercise) => !baseExercises.includes(exercise))
+    const customExercises = Array.from(
+      new Set([
+        ...customExercisesByBodyPart[selectedBodyPart],
+        ...Array.from(exerciseUsageStats.keys()).filter((exercise) => !baseExercises.includes(exercise)),
+      ]),
+    )
       .sort((left, right) => {
         const leftStat = exerciseUsageStats.get(left)
         const rightStat = exerciseUsageStats.get(right)
@@ -1695,7 +1752,7 @@ function App() {
     }
 
     return sortedExercises.filter((exercise) => exercise.includes(query))
-  }, [exerciseSearchQuery, exerciseUsageStats, selectedBodyPart])
+  }, [customExercisesByBodyPart, exerciseSearchQuery, exerciseUsageStats, selectedBodyPart])
 
   const bodyPartReadiness = useMemo(() => {
     const readinessMap = new Map<BodyPart, { label: string; tone: BodyPartBadgeTone }>()
@@ -1919,7 +1976,20 @@ function App() {
       showToast('種目名を入力してください', 'error')
       return
     }
+
+    setCustomExercisesByBodyPart((previous) => {
+      const bodyPartCustoms = previous[selectedBodyPart]
+      if (bodyPartCustoms.includes(name) || EXERCISES_BY_BODY_PART[selectedBodyPart].includes(name)) {
+        return previous
+      }
+      return {
+        ...previous,
+        [selectedBodyPart]: [...bodyPartCustoms, name],
+      }
+    })
+
     handleExerciseSelect(name)
+    showToast(`「${name}」を追加しました`)
     setCustomExerciseInput('')
   }
 
