@@ -912,7 +912,6 @@ function App() {
   const [sets, setSets] = useState<ExerciseSet[]>([createSet(0), createSet(1), createSet(2)])
   const [restSeconds, setRestSeconds] = useState(90)
   const [timerRunning, setTimerRunning] = useState(false)
-  const [historyQuery, setHistoryQuery] = useState('')
   const [historyBodyPartFilter, setHistoryBodyPartFilter] = useState<BodyPart | 'all'>('all')
   const [historyExerciseFilter, setHistoryExerciseFilter] = useState<string>('all')
   const [isHistorySelectionMode, setIsHistorySelectionMode] = useState(false)
@@ -1153,20 +1152,13 @@ function App() {
     const sorted = [...sessions].sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())
     return sorted.filter((session) => {
       const dateText = dayjs(session.date).format('YYYY-MM-DD')
-      const hasExercise = session.exercises.some((exercise) => exercise.name.includes(historyQuery))
-      const matchesQuery =
-        !historyQuery || dateText.includes(historyQuery) || session.bodyPart.includes(historyQuery) || hasExercise
-      if (!matchesQuery) {
-        return false
-      }
-
       if (historySelectedDate) {
         return dateText === historySelectedDate
       }
 
       return dayjs(session.date).isSame(historyMonth, 'month')
     })
-  }, [historyMonth, historyQuery, historySelectedDate, sessions])
+  }, [historyMonth, historySelectedDate, sessions])
 
   const historyBodyPartCounts = useMemo(() => {
     const counts = new Map<BodyPart, number>()
@@ -1272,7 +1264,7 @@ function App() {
 
   useEffect(() => {
     setIsHistoryDeleteConfirming(false)
-  }, [historyBodyPartFilter, historyExerciseFilter, historyQuery, historySelectedDate, selectedHistoryIds])
+  }, [historyBodyPartFilter, historyExerciseFilter, historySelectedDate, selectedHistoryIds])
 
   useEffect(() => {
     if (historyBodyPartFilter === 'all') {
@@ -2512,11 +2504,6 @@ function App() {
               )}
             </div>
           </div>
-          <input
-            value={historyQuery}
-            onChange={(e) => setHistoryQuery(e.target.value)}
-            placeholder="日付 / 部位 / 種目で検索"
-          />
           <div className="chip-row history-chip-row">
             <button
               type="button"

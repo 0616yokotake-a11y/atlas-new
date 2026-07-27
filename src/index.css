@@ -55,7 +55,7 @@ body {
 }
 
 .app.has-fixed-nav {
-  padding-bottom: calc(132px + env(safe-area-inset-bottom));
+  padding-bottom: calc(144px + env(safe-area-inset-bottom));
 }
 
 .app.no-scroll {
@@ -1277,6 +1277,11 @@ button.secondary-btn {
 
 .history-screen-card {
   overflow: visible;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+
+.history-screen-card .history-date-group:last-of-type {
+  margin-bottom: 10px;
 }
 
 .custom-exercise-row {
@@ -1481,14 +1486,14 @@ button.holding {
   display: grid;
   grid-template-rows: auto auto auto;
   min-height: 178px;
-  overflow: hidden;
+  overflow: visible;
   padding-bottom: 8px;
 }
 
 .home-grid .mini-chart {
   height: auto;
   min-height: 96px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .home-kpi-inline {
