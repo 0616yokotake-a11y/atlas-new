@@ -917,6 +917,7 @@ function App() {
   const [isDeletingHistory, setIsDeletingHistory] = useState(false)
   const [historyMonthCursor, setHistoryMonthCursor] = useState(() => dayjs().startOf('month').format('YYYY-MM-DD'))
   const [historySelectedDate, setHistorySelectedDate] = useState<string | null>(null)
+  const [historyOpenDates, setHistoryOpenDates] = useState<string[]>([])
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
@@ -1158,6 +1159,57 @@ function App() {
       return dayjs(session.date).isSame(historyMonth, 'month')
     })
   }, [historyMonth, historyQuery, historySelectedDate, sessions])
+
+  const historyDateSections = useMemo(() => {
+    const sections = new Map<
+      string,
+      {
+        date: string
+        sessions: WorkoutSession[]
+        sessionCount: number
+        totalVolume: number
+      }
+    >()
+
+    groupedHistory.forEach((session) => {
+      const dateKey = dayjs(session.date).format('YYYY-MM-DD')
+      const existing = sections.get(dateKey)
+      const sessionVolume = session.exercises
+        .flatMap((exercise) => exercise.sets)
+        .reduce((sum, set) => sum + set.weight * set.reps, 0)
+      if (!existing) {
+        sections.set(dateKey, {
+          date: dateKey,
+          sessions: [session],
+          sessionCount: 1,
+          totalVolume: sessionVolume,
+        })
+        return
+      }
+
+      existing.sessions.push(session)
+      existing.sessionCount += 1
+      existing.totalVolume += sessionVolume
+    })
+
+    return Array.from(sections.values()).sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())
+  }, [groupedHistory])
+
+  useEffect(() => {
+    setHistoryOpenDates((previous) => {
+      const sectionKeys = new Set(historyDateSections.map((section) => section.date))
+      const stillOpen = previous.filter((date) => sectionKeys.has(date))
+      if (stillOpen.length > 0) {
+        return stillOpen
+      }
+
+      if (historySelectedDate && sectionKeys.has(historySelectedDate)) {
+        return [historySelectedDate]
+      }
+
+      return historyDateSections[0] ? [historyDateSections[0].date] : []
+    })
+  }, [historyDateSections, historySelectedDate])
 
   const daysSinceByBodyPart = useMemo(() => {
     const today = dayjs()
@@ -2227,37 +2279,61 @@ function App() {
             onChange={(e) => setHistoryQuery(e.target.value)}
             placeholder="日付 / 部位 / 種目で検索"
           />
-          {groupedHistory.map((session) => (
-            <article key={session.id} className="history-item">
-              <div className="history-item-head">
-                <strong>
-                  {dayjs(session.date).format('YYYY/MM/DD')} - {session.bodyPart}
-                </strong>
+          {historyDateSections.map((section) => {
+            const isOpen = historyOpenDates.includes(section.date)
+            return (
+              <section key={section.date} className="history-date-group">
                 <button
                   type="button"
-                  className={`history-delete-btn ${historyDeleteTargetId === session.id ? 'danger' : ''}`}
-                  disabled={isDeletingHistory}
+                  className="history-date-toggle"
                   onClick={() => {
-                    if (historyDeleteTargetId === session.id) {
-                      void handleDeleteHistorySession(session.id)
-                      return
-                    }
-
-                    setHistoryDeleteTargetId(session.id)
+                    triggerHaptic(10)
+                    setHistoryOpenDates((previous) =>
+                      previous.includes(section.date)
+                        ? previous.filter((date) => date !== section.date)
+                        : [...previous, section.date],
+                    )
                   }}
                 >
-                  {historyDeleteTargetId === session.id ? '削除する' : '削除'}
+                  <div>
+                    <strong>{dayjs(section.date).format('YYYY/MM/DD')}</strong>
+                    <small>{section.sessionCount}件 / 総重量 {section.totalVolume.toLocaleString()}kg</small>
+                  </div>
+                  <span>{isOpen ? '−' : '+'}</span>
                 </button>
-              </div>
-              {session.exercises.map((exercise) => (
-                <p key={exercise.id}>
-                  {exercise.name}:{' '}
-                  {exercise.sets.map((set) => `${set.weight}×${set.reps}`).join(' / ')}
-                </p>
-              ))}
-            </article>
-          ))}
-          {groupedHistory.length === 0 && <p>履歴がありません。</p>}
+                {isOpen &&
+                  section.sessions.map((session) => (
+                    <article key={session.id} className="history-item">
+                      <div className="history-item-head">
+                        <strong>{session.bodyPart}</strong>
+                        <button
+                          type="button"
+                          className={`history-delete-btn ${historyDeleteTargetId === session.id ? 'danger' : ''}`}
+                          disabled={isDeletingHistory}
+                          onClick={() => {
+                            if (historyDeleteTargetId === session.id) {
+                              void handleDeleteHistorySession(session.id)
+                              return
+                            }
+
+                            setHistoryDeleteTargetId(session.id)
+                          }}
+                        >
+                          {historyDeleteTargetId === session.id ? '削除する' : '削除'}
+                        </button>
+                      </div>
+                      {session.exercises.map((exercise) => (
+                        <p key={exercise.id}>
+                          {exercise.name}:{' '}
+                          {exercise.sets.map((set) => `${set.weight}×${set.reps}`).join(' / ')}
+                        </p>
+                      ))}
+                    </article>
+                  ))}
+              </section>
+            )
+          })}
+          {historyDateSections.length === 0 && <p>履歴がありません。</p>}
         </section>
       )}
 
