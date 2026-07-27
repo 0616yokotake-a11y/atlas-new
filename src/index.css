@@ -835,6 +835,10 @@ button:disabled {
   gap: 6px;
 }
 
+.history-exercise-chip-row {
+  margin-top: 6px;
+}
+
 .history-chip-count {
   color: #94a3b8;
   font-size: 0.72rem;

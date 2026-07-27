@@ -914,6 +914,7 @@ function App() {
   const [timerRunning, setTimerRunning] = useState(false)
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyBodyPartFilter, setHistoryBodyPartFilter] = useState<BodyPart | 'all'>('all')
+  const [historyExerciseFilter, setHistoryExerciseFilter] = useState<string>('all')
   const [isHistorySelectionMode, setIsHistorySelectionMode] = useState(false)
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([])
   const [isHistoryDeleteConfirming, setIsHistoryDeleteConfirming] = useState(false)
@@ -1174,12 +1175,37 @@ function App() {
     return counts
   }, [historyBaseFiltered])
 
-  const groupedHistory = useMemo(() => {
+  const historyBodyPartFiltered = useMemo(() => {
     if (historyBodyPartFilter === 'all') {
       return historyBaseFiltered
     }
     return historyBaseFiltered.filter((session) => session.bodyPart === historyBodyPartFilter)
   }, [historyBaseFiltered, historyBodyPartFilter])
+
+  const historyExerciseCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    historyBodyPartFiltered.forEach((session) => {
+      session.exercises.forEach((exercise) => {
+        counts.set(exercise.name, (counts.get(exercise.name) ?? 0) + 1)
+      })
+    })
+    return counts
+  }, [historyBodyPartFiltered])
+
+  const historyExerciseChips = useMemo(() => {
+    return Array.from(historyExerciseCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }))
+  }, [historyExerciseCounts])
+
+  const groupedHistory = useMemo(() => {
+    if (historyExerciseFilter === 'all') {
+      return historyBodyPartFiltered
+    }
+    return historyBodyPartFiltered.filter((session) =>
+      session.exercises.some((exercise) => exercise.name === historyExerciseFilter),
+    )
+  }, [historyBodyPartFiltered, historyExerciseFilter])
 
   const visibleHistoryIds = useMemo(() => groupedHistory.map((session) => session.id), [groupedHistory])
   const isAllVisibleHistorySelected = useMemo(
@@ -1244,7 +1270,25 @@ function App() {
 
   useEffect(() => {
     setIsHistoryDeleteConfirming(false)
-  }, [historyBodyPartFilter, historyQuery, historySelectedDate, selectedHistoryIds])
+  }, [historyBodyPartFilter, historyExerciseFilter, historyQuery, historySelectedDate, selectedHistoryIds])
+
+  useEffect(() => {
+    if (historyBodyPartFilter === 'all') {
+      return
+    }
+    if ((historyBodyPartCounts.get(historyBodyPartFilter) ?? 0) === 0) {
+      setHistoryBodyPartFilter('all')
+    }
+  }, [historyBodyPartCounts, historyBodyPartFilter])
+
+  useEffect(() => {
+    if (historyExerciseFilter === 'all') {
+      return
+    }
+    if ((historyExerciseCounts.get(historyExerciseFilter) ?? 0) === 0) {
+      setHistoryExerciseFilter('all')
+    }
+  }, [historyExerciseCounts, historyExerciseFilter])
 
   const daysSinceByBodyPart = useMemo(() => {
     const today = dayjs()
@@ -2325,6 +2369,7 @@ function App() {
               onClick={() => {
                 triggerHaptic(10)
                 setHistoryBodyPartFilter('all')
+                setHistoryExerciseFilter('all')
               }}
             >
               全部位
@@ -2342,10 +2387,41 @@ function App() {
                   onClick={() => {
                     triggerHaptic(10)
                     setHistoryBodyPartFilter(part)
+                    setHistoryExerciseFilter('all')
                   }}
                 >
                   {part}
                   <small className="history-chip-count">{count}</small>
+                </button>
+              )
+            })}
+          </div>
+          <div className="chip-row history-chip-row history-exercise-chip-row">
+            <button
+              type="button"
+              className={`chip-button ${historyExerciseFilter === 'all' ? 'active' : ''}`}
+              onClick={() => {
+                triggerHaptic(10)
+                setHistoryExerciseFilter('all')
+              }}
+            >
+              全種目
+              <small className="history-chip-count">{historyBodyPartFiltered.length}</small>
+            </button>
+            {historyExerciseChips.map((chip) => {
+              const isActive = historyExerciseFilter === chip.name
+              return (
+                <button
+                  key={chip.name}
+                  type="button"
+                  className={`chip-button ${isActive ? 'active' : ''}`}
+                  onClick={() => {
+                    triggerHaptic(10)
+                    setHistoryExerciseFilter(chip.name)
+                  }}
+                >
+                  {chip.name}
+                  <small className="history-chip-count">{chip.count}</small>
                 </button>
               )
             })}
