@@ -2632,7 +2632,7 @@ function App() {
               <section key={section.date} className="history-date-group">
                 <button
                   type="button"
-                  className="history-date-toggle"
+                  className={`history-date-toggle ${isOpen ? 'open' : ''}`}
                   onClick={() => {
                     triggerHaptic(10)
                     setHistoryOpenDates((previous) =>
@@ -2646,7 +2646,10 @@ function App() {
                     <strong>{dayjs(section.date).format('YYYY/MM/DD')}</strong>
                     <small>{section.sessionCount}件 / 総重量 {section.totalVolume.toLocaleString()}kg</small>
                   </div>
-                  <span>{isOpen ? '−' : '+'}</span>
+                  <div className="history-date-toggle-state">
+                    <small className={`history-open-badge ${isOpen ? 'open' : ''}`}>{isOpen ? '表示中' : '未表示'}</small>
+                    <span className={`history-toggle-icon ${isOpen ? 'open' : ''}`}>{isOpen ? '−' : '+'}</span>
+                  </div>
                 </button>
                 {isOpen &&
                   section.sessions.map((session) => (

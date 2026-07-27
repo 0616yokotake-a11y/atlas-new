@@ -157,7 +157,7 @@ body {
   backdrop-filter: blur(10px);
   min-width: 0;
   position: relative;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .card::before {
@@ -296,8 +296,9 @@ button:disabled {
 }
 
 button.secondary-btn {
-  background: rgba(30, 41, 59, 0.82);
-  border: 1px solid rgba(125, 211, 252, 0.24);
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.88));
+  border: 1px solid rgba(125, 211, 252, 0.28);
   box-shadow: none;
   color: #dbeafe;
 }
@@ -444,6 +445,13 @@ button.secondary-btn {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
+.history-date-toggle.open {
+  border-color: rgba(125, 211, 252, 0.5);
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(34, 211, 238, 0.2), transparent 70%),
+    rgba(15, 23, 42, 0.82);
+}
+
 .history-date-toggle div {
   display: grid;
   gap: 2px;
@@ -460,10 +468,44 @@ button.secondary-btn {
   color: #94a3b8;
 }
 
-.history-date-toggle span {
-  font-size: 1.08rem;
-  font-weight: 700;
+.history-date-toggle-state {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.history-open-badge {
+  color: #94a3b8;
+  font-size: 0.66rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  background: rgba(30, 41, 59, 0.62);
+}
+
+.history-open-badge.open {
+  color: #cffafe;
+  border-color: rgba(125, 211, 252, 0.48);
+  background: rgba(8, 47, 73, 0.62);
+}
+
+.history-toggle-icon {
+  min-width: 26px;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 800;
   color: #bae6fd;
+  border: 1px solid rgba(125, 211, 252, 0.34);
+  background: rgba(15, 23, 42, 0.64);
+}
+
+.history-toggle-icon.open {
+  background: rgba(8, 47, 73, 0.78);
+  border-color: rgba(125, 211, 252, 0.56);
 }
 
 .history-calendar-card {
@@ -721,8 +763,9 @@ button.secondary-btn {
   grid-template-columns: repeat(7, 1fr);
   gap: 8px;
   align-items: end;
-  min-height: 122px;
+  min-height: 128px;
   height: auto;
+  padding-bottom: 6px;
 }
 
 .mini-chart-item {
@@ -736,7 +779,7 @@ button.secondary-btn {
 .mini-chart-item span {
   font-size: 0.72rem;
   color: #93c5fd;
-  line-height: 1;
+  line-height: 1.15;
 }
 
 .mini-bar-value {
@@ -747,10 +790,11 @@ button.secondary-btn {
 
 .mini-bar-track {
   width: 100%;
-  max-width: 26px;
+  max-width: 24px;
   height: 82px;
   display: flex;
   align-items: flex-end;
+  margin: 0 auto;
 }
 
 .mini-bar {
@@ -1417,17 +1461,17 @@ button.holding {
 
 .home-graph-card {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto auto;
   flex: 1;
   min-height: 0;
-  overflow: visible;
-  padding-bottom: 6px;
+  overflow: hidden;
+  padding-bottom: 8px;
 }
 
 .home-grid .mini-chart {
   height: auto;
-  min-height: 122px;
-  overflow: visible;
+  min-height: 128px;
+  overflow: hidden;
 }
 
 .home-kpi-inline {
@@ -1586,11 +1630,11 @@ button.holding {
   }
 
   .home-grid .mini-chart {
-    min-height: 98px;
+    min-height: 114px;
   }
 
   .mini-bar-track {
-    height: 74px;
+    height: 76px;
   }
 
   .thumb-workout-cta {
@@ -1631,11 +1675,11 @@ button.holding {
   }
 
   .home-grid .mini-chart {
-    min-height: 86px;
+    min-height: 104px;
   }
 
   .mini-bar-track {
-    height: 64px;
+    height: 68px;
   }
 
   .thumb-workout-cta {
