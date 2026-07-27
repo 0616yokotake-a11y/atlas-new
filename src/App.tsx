@@ -2112,13 +2112,6 @@ function App() {
 
           <section className="home-kpi-inline">
             <p className="kpi-chip">
-              <span className="kpi-label">連続</span>
-              <strong className="kpi-value">
-                {streakDays}
-                <small>日</small>
-              </strong>
-            </p>
-            <p className="kpi-chip">
               <span className="kpi-label">今週重量</span>
               <strong className="kpi-value">
                 {weeklyTotalVolume.toLocaleString()}
@@ -2128,6 +2121,13 @@ function App() {
             <p className="kpi-chip">
               <span className="kpi-label">前週比</span>
               <strong className="kpi-value">{weeklyDeltaLabel}</strong>
+            </p>
+            <p className="kpi-chip">
+              <span className="kpi-label">連続</span>
+              <strong className="kpi-value">
+                {streakDays}
+                <small>日</small>
+              </strong>
             </p>
             <p className="kpi-chip">
               <span className="kpi-label">バランス</span>
