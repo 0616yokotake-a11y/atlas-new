@@ -915,6 +915,8 @@ function App() {
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyDeleteTargetId, setHistoryDeleteTargetId] = useState<string | null>(null)
   const [isDeletingHistory, setIsDeletingHistory] = useState(false)
+  const [historyMonthCursor, setHistoryMonthCursor] = useState(() => dayjs().startOf('month').format('YYYY-MM-DD'))
+  const [historySelectedDate, setHistorySelectedDate] = useState<string | null>(null)
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
@@ -996,6 +998,18 @@ function App() {
       setHistoryDeleteTargetId(null)
     }
   }, [tab])
+
+  useEffect(() => {
+    if (!historySelectedDate) {
+      return
+    }
+
+    const selected = dayjs(historySelectedDate)
+    const cursor = dayjs(historyMonthCursor)
+    if (!selected.isSame(cursor, 'month')) {
+      setHistorySelectedDate(null)
+    }
+  }, [historyMonthCursor, historySelectedDate])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1095,18 +1109,55 @@ function App() {
 
   const canUseApp = Boolean(user) || isDemoMode
 
+  const historyMonth = useMemo(() => dayjs(historyMonthCursor), [historyMonthCursor])
+
+  const historySessionsByDate = useMemo(() => {
+    const map = new Map<string, WorkoutSession[]>()
+    sessions.forEach((session) => {
+      const dateKey = dayjs(session.date).format('YYYY-MM-DD')
+      const bucket = map.get(dateKey) ?? []
+      bucket.push(session)
+      map.set(dateKey, bucket)
+    })
+    return map
+  }, [sessions])
+
+  const historyCalendarDays = useMemo(() => {
+    const start = historyMonth.startOf('month').startOf('week')
+    const end = historyMonth.endOf('month').endOf('week')
+    const days: Array<{ key: string; dayLabel: string; isCurrentMonth: boolean; sessionCount: number }> = []
+    let cursor = start
+    while (cursor.isBefore(end) || cursor.isSame(end, 'day')) {
+      const key = cursor.format('YYYY-MM-DD')
+      days.push({
+        key,
+        dayLabel: cursor.format('D'),
+        isCurrentMonth: cursor.isSame(historyMonth, 'month'),
+        sessionCount: historySessionsByDate.get(key)?.length ?? 0,
+      })
+      cursor = cursor.add(1, 'day')
+    }
+    return days
+  }, [historyMonth, historySessionsByDate])
+
   const groupedHistory = useMemo(() => {
     const sorted = [...sessions].sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())
-    if (!historyQuery) {
-      return sorted
-    }
-
     return sorted.filter((session) => {
       const dateText = dayjs(session.date).format('YYYY-MM-DD')
       const hasExercise = session.exercises.some((exercise) => exercise.name.includes(historyQuery))
-      return dateText.includes(historyQuery) || session.bodyPart.includes(historyQuery) || hasExercise
+      const matchesQuery =
+        !historyQuery || dateText.includes(historyQuery) || session.bodyPart.includes(historyQuery) || hasExercise
+      if (!matchesQuery) {
+        return false
+      }
+
+      if (historySelectedDate) {
+        return dateText === historySelectedDate
+      }
+
+      return dayjs(session.date).isSame(historyMonth, 'month')
     })
-  }, [historyQuery, sessions])
+  }, [historyMonth, historyQuery, historySelectedDate, sessions])
 
   const daysSinceByBodyPart = useMemo(() => {
     const today = dayjs()
@@ -2110,6 +2161,67 @@ function App() {
       {tab === 'history' && (
         <section className="card">
           <h2>履歴</h2>
+          <div className="history-calendar-card">
+            <div className="history-calendar-header">
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(10)
+                  setHistoryMonthCursor((previous) => dayjs(previous).subtract(1, 'month').format('YYYY-MM-DD'))
+                }}
+              >
+                ←
+              </button>
+              <strong>{historyMonth.format('YYYY年 M月')}</strong>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(10)
+                  setHistoryMonthCursor((previous) => dayjs(previous).add(1, 'month').format('YYYY-MM-DD'))
+                }}
+              >
+                →
+              </button>
+            </div>
+            <div className="history-calendar-weekdays">
+              {['日', '月', '火', '水', '木', '金', '土'].map((weekday) => (
+                <span key={weekday}>{weekday}</span>
+              ))}
+            </div>
+            <div className="history-calendar-grid">
+              {historyCalendarDays.map((day) => (
+                <button
+                  key={day.key}
+                  type="button"
+                  className={`history-calendar-day ${!day.isCurrentMonth ? 'other-month' : ''} ${day.sessionCount > 0 ? 'has-log' : ''} ${historySelectedDate === day.key ? 'active' : ''}`}
+                  onClick={() => {
+                    triggerHaptic(10)
+                    if (!day.isCurrentMonth) {
+                      setHistoryMonthCursor(day.key)
+                    }
+                    setHistorySelectedDate((previous) => (previous === day.key ? null : day.key))
+                  }}
+                >
+                  <span>{day.dayLabel}</span>
+                  {day.sessionCount > 0 && <small>{day.sessionCount}</small>}
+                </button>
+              ))}
+            </div>
+            <div className="history-calendar-selection">
+              <p>{historySelectedDate ? `${dayjs(historySelectedDate).format('M/D')} の履歴` : '日付をタップでその日の詳細を表示'}</p>
+              {historySelectedDate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(10)
+                    setHistorySelectedDate(null)
+                  }}
+                >
+                  全日表示
+                </button>
+              )}
+            </div>
+          </div>
           <input
             value={historyQuery}
             onChange={(e) => setHistoryQuery(e.target.value)}
