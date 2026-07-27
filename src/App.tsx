@@ -913,6 +913,7 @@ function App() {
   const [restSeconds, setRestSeconds] = useState(90)
   const [timerRunning, setTimerRunning] = useState(false)
   const [historyQuery, setHistoryQuery] = useState('')
+  const [historyBodyPartFilter, setHistoryBodyPartFilter] = useState<BodyPart | 'all'>('all')
   const [isHistorySelectionMode, setIsHistorySelectionMode] = useState(false)
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([])
   const [isHistoryDeleteConfirming, setIsHistoryDeleteConfirming] = useState(false)
@@ -1145,7 +1146,7 @@ function App() {
     return days
   }, [historyMonth, historySessionsByDate])
 
-  const groupedHistory = useMemo(() => {
+  const historyBaseFiltered = useMemo(() => {
     const sorted = [...sessions].sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())
     return sorted.filter((session) => {
       const dateText = dayjs(session.date).format('YYYY-MM-DD')
@@ -1163,6 +1164,22 @@ function App() {
       return dayjs(session.date).isSame(historyMonth, 'month')
     })
   }, [historyMonth, historyQuery, historySelectedDate, sessions])
+
+  const historyBodyPartCounts = useMemo(() => {
+    const counts = new Map<BodyPart, number>()
+    BODY_PARTS.forEach((part) => counts.set(part, 0))
+    historyBaseFiltered.forEach((session) => {
+      counts.set(session.bodyPart, (counts.get(session.bodyPart) ?? 0) + 1)
+    })
+    return counts
+  }, [historyBaseFiltered])
+
+  const groupedHistory = useMemo(() => {
+    if (historyBodyPartFilter === 'all') {
+      return historyBaseFiltered
+    }
+    return historyBaseFiltered.filter((session) => session.bodyPart === historyBodyPartFilter)
+  }, [historyBaseFiltered, historyBodyPartFilter])
 
   const visibleHistoryIds = useMemo(() => groupedHistory.map((session) => session.id), [groupedHistory])
   const isAllVisibleHistorySelected = useMemo(
@@ -1227,7 +1244,7 @@ function App() {
 
   useEffect(() => {
     setIsHistoryDeleteConfirming(false)
-  }, [historyQuery, historySelectedDate, selectedHistoryIds])
+  }, [historyBodyPartFilter, historyQuery, historySelectedDate, selectedHistoryIds])
 
   const daysSinceByBodyPart = useMemo(() => {
     const today = dayjs()
@@ -2301,6 +2318,38 @@ function App() {
             onChange={(e) => setHistoryQuery(e.target.value)}
             placeholder="日付 / 部位 / 種目で検索"
           />
+          <div className="chip-row history-chip-row">
+            <button
+              type="button"
+              className={`chip-button ${historyBodyPartFilter === 'all' ? 'active' : ''}`}
+              onClick={() => {
+                triggerHaptic(10)
+                setHistoryBodyPartFilter('all')
+              }}
+            >
+              全部位
+              <small className="history-chip-count">{historyBaseFiltered.length}</small>
+            </button>
+            {BODY_PARTS.map((part) => {
+              const count = historyBodyPartCounts.get(part) ?? 0
+              const isActive = historyBodyPartFilter === part
+              return (
+                <button
+                  key={part}
+                  type="button"
+                  className={`chip-button ${isActive ? 'active' : ''}`}
+                  disabled={!isActive && count === 0}
+                  onClick={() => {
+                    triggerHaptic(10)
+                    setHistoryBodyPartFilter(part)
+                  }}
+                >
+                  {part}
+                  <small className="history-chip-count">{count}</small>
+                </button>
+              )
+            })}
+          </div>
           <div className="history-bulk-actions">
             {!isHistorySelectionMode ? (
               <button

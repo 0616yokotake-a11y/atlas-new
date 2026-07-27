@@ -819,6 +819,28 @@ button:disabled {
   font-size: 0.82rem;
 }
 
+.chip-button.active {
+  background: rgba(8, 47, 73, 0.45);
+  border: 1px solid rgba(125, 211, 252, 0.52);
+  color: #bae6fd;
+}
+
+.chip-button:disabled {
+  opacity: 0.45;
+}
+
+.history-chip-row .chip-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.history-chip-count {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .exercise-item {
   display: grid;
   grid-template-columns: 1fr auto;
