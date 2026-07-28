@@ -1001,11 +1001,20 @@ function App() {
   const [aiFeedback, setAiFeedback] = useState<string[]>([])
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [aiProvider, setAiProvider] = useState<'openai' | 'gemini'>(() => {
+    if (typeof window === 'undefined') return 'openai'
+    return (window.localStorage.getItem('atlas.ai-provider.v1') as 'openai' | 'gemini') ?? 'openai'
+  })
   const [openaiApiKey, setOpenaiApiKey] = useState(() => {
     if (typeof window === 'undefined') return ''
     return window.localStorage.getItem('atlas.openai-api-key.v1') ?? ''
   })
   const [openaiApiKeyDraft, setOpenaiApiKeyDraft] = useState(openaiApiKey)
+  const [geminiApiKey, setGeminiApiKey] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return window.localStorage.getItem('atlas.gemini-api-key.v1') ?? ''
+  })
+  const [geminiApiKeyDraft, setGeminiApiKeyDraft] = useState(geminiApiKey)
   const [exerciseInfoTarget, setExerciseInfoTarget] = useState<string | null>(null)
   const [pickerTarget, setPickerTarget] = useState<{ setId: string; key: 'weight' | 'reps' } | null>(null)
   const [pickerValue, setPickerValue] = useState(0)
@@ -2344,7 +2353,8 @@ function App() {
     let active = true
     setAiLoading(true)
     setAiError(null)
-    void requestAiFeedback(sessions, openaiApiKey)
+    const apiKey = aiProvider === 'gemini' ? geminiApiKey : openaiApiKey
+    void requestAiFeedback(sessions, apiKey, aiProvider)
       .then((feedback) => {
         if (!active) {
           return
@@ -2367,7 +2377,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [sessions, tab, openaiApiKey])
+  }, [sessions, tab, openaiApiKey, geminiApiKey, aiProvider])
 
   async function logout() {
     if (!auth) {
@@ -3134,44 +3144,108 @@ function App() {
           {authError && <p className="error">{authError}</p>}
            
           <div className="settings-section">
-            <label htmlFor="openai-api-key">
-              <strong>OpenAI API キー</strong>
-              <p className="settings-hint">ChatGPT のアカウントから API キーを取得して貼り付けてください。分析 AI にのみ使用されます。</p>
-              <input
-                id="openai-api-key"
-                type="password"
-                value={openaiApiKeyDraft}
-                onChange={(event) => setOpenaiApiKeyDraft(event.currentTarget.value)}
-                placeholder="sk-proj-..."
+            <label htmlFor="ai-provider">
+              <strong>AI プロバイダ</strong>
+              <p className="settings-hint">分析に使用する AI を選択してください。</p>
+              <select
+                id="ai-provider"
+                value={aiProvider}
+                onChange={(event) => {
+                  const value = event.currentTarget.value as 'openai' | 'gemini'
+                  setAiProvider(value)
+                  window.localStorage.setItem('atlas.ai-provider.v1', value)
+                }}
                 className="settings-input"
-              />
+              >
+                <option value="openai">OpenAI (ChatGPT)</option>
+                <option value="gemini">Google Gemini</option>
+              </select>
             </label>
-            <button
-              type="button"
-              className="secondary-btn"
-              onClick={() => {
-                window.localStorage.setItem('atlas.openai-api-key.v1', openaiApiKeyDraft.trim())
-                setOpenaiApiKey(openaiApiKeyDraft.trim())
-                showToast(openaiApiKeyDraft.trim() ? 'API キーを保存しました' : 'API キーを削除しました')
-              }}
-            >
-              {openaiApiKey ? 'API キーを更新' : 'API キーを設定'}
-            </button>
-            {openaiApiKey && (
+          </div>
+           
+          {aiProvider === 'openai' && (
+            <div className="settings-section">
+              <label htmlFor="openai-api-key">
+                <strong>OpenAI API キー</strong>
+                <p className="settings-hint">ChatGPT のアカウントから API キーを取得して貼り付けてください。分析 AI にのみ使用されます。</p>
+                <input
+                  id="openai-api-key"
+                  type="password"
+                  value={openaiApiKeyDraft}
+                  onChange={(event) => setOpenaiApiKeyDraft(event.currentTarget.value)}
+                  placeholder="sk-proj-..."
+                  className="settings-input"
+                />
+              </label>
               <button
                 type="button"
                 className="secondary-btn"
                 onClick={() => {
-                  window.localStorage.removeItem('atlas.openai-api-key.v1')
-                  setOpenaiApiKey('')
-                  setOpenaiApiKeyDraft('')
-                  showToast('API キーを削除しました')
+                  window.localStorage.setItem('atlas.openai-api-key.v1', openaiApiKeyDraft.trim())
+                  setOpenaiApiKey(openaiApiKeyDraft.trim())
+                  showToast(openaiApiKeyDraft.trim() ? 'API キーを保存しました' : 'API キーを削除しました')
                 }}
               >
-                API キーを削除
+                {openaiApiKey ? 'API キーを更新' : 'API キーを設定'}
               </button>
-            )}
-          </div>
+              {openaiApiKey && (
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => {
+                    window.localStorage.removeItem('atlas.openai-api-key.v1')
+                    setOpenaiApiKey('')
+                    setOpenaiApiKeyDraft('')
+                    showToast('API キーを削除しました')
+                  }}
+                >
+                  API キーを削除
+                </button>
+              )}
+            </div>
+          )}
+
+          {aiProvider === 'gemini' && (
+            <div className="settings-section">
+              <label htmlFor="gemini-api-key">
+                <strong>Google Gemini API キー</strong>
+                <p className="settings-hint">Google AI Studio から API キーを取得して貼り付けてください。分析 AI にのみ使用されます。</p>
+                <input
+                  id="gemini-api-key"
+                  type="password"
+                  value={geminiApiKeyDraft}
+                  onChange={(event) => setGeminiApiKeyDraft(event.currentTarget.value)}
+                  placeholder="AIzaSy..."
+                  className="settings-input"
+                />
+              </label>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => {
+                  window.localStorage.setItem('atlas.gemini-api-key.v1', geminiApiKeyDraft.trim())
+                  setGeminiApiKey(geminiApiKeyDraft.trim())
+                  showToast(geminiApiKeyDraft.trim() ? 'API キーを保存しました' : 'API キーを削除しました')
+                }}
+              >
+                {geminiApiKey ? 'API キーを更新' : 'API キーを設定'}
+              </button>
+              {geminiApiKey && (
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => {
+                    window.localStorage.removeItem('atlas.gemini-api-key.v1')
+                    setGeminiApiKey('')
+                    setGeminiApiKeyDraft('')
+                    showToast('API キーを削除しました')
+                  }}
+                >
+                  API キーを削除
+                </button>
+              )}
+            </div>
+          )}
 
           <button type="button" onClick={logout}>
             ログアウト
