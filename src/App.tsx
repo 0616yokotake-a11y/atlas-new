@@ -17,7 +17,6 @@ import { auth, db, isFirebaseConfigured } from './lib/firebase'
 import { BODY_PARTS, EXERCISES_BY_BODY_PART } from './data/catalog'
 import { useAtlasStore } from './store/useAtlasStore'
 import { removeSession, saveSession, subscribeSessions } from './lib/firestoreSync'
-import { requestAiFeedback } from './lib/aiFeedback'
 import type { BodyPart, ExerciseSet, WorkoutSession } from './types'
 
 type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'settings'
@@ -999,23 +998,6 @@ function App() {
   const [exerciseNoteDraft, setExerciseNoteDraft] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
-  const [aiFeedback, setAiFeedback] = useState<string[]>([])
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiError, setAiError] = useState<string | null>(null)
-  const [aiProvider, setAiProvider] = useState<'openai' | 'gemini'>(() => {
-    if (typeof window === 'undefined') return 'openai'
-    return (window.localStorage.getItem('atlas.ai-provider.v1') as 'openai' | 'gemini') ?? 'openai'
-  })
-  const [openaiApiKey, setOpenaiApiKey] = useState(() => {
-    if (typeof window === 'undefined') return ''
-    return window.localStorage.getItem('atlas.openai-api-key.v1') ?? ''
-  })
-  const [openaiApiKeyDraft, setOpenaiApiKeyDraft] = useState(openaiApiKey)
-  const [geminiApiKey, setGeminiApiKey] = useState(() => {
-    if (typeof window === 'undefined') return ''
-    return window.localStorage.getItem('atlas.gemini-api-key.v1') ?? ''
-  })
-  const [geminiApiKeyDraft, setGeminiApiKeyDraft] = useState(geminiApiKey)
   const [isProUnlocked, setIsProUnlocked] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem(PRO_UNLOCKED_STORAGE_KEY) === '1'
@@ -1565,11 +1547,6 @@ function App() {
   }, [weeklyCalories])
 
   const homeAiMessage = useMemo(() => {
-    if (aiFeedback[0]) {
-      const compact = aiFeedback[0].replace(/\s+/g, ' ').trim()
-      return compact.length > 72 ? `${compact.slice(0, 72)}…` : compact
-    }
-
     if (sessions.length === 0) {
       return '最初の1セットを記録して、あなた専用のメッセージを育てよう。'
     }
@@ -1579,7 +1556,7 @@ function App() {
     const weeklyKcal = weeklyCalories.total
     const raw = `前回は${dayjs(latest.date).format('M/D')}。休養${restDays}日、今週推定${weeklyKcal}kcal。今日はフォームを丁寧に積み上げよう。`
     return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw
-  }, [aiFeedback, sessions, weeklyCalories.total])
+  }, [sessions, weeklyCalories.total])
 
   const latestSessionSummary = useMemo(() => {
     if (sessions.length === 0) {
@@ -2022,91 +1999,6 @@ function App() {
     const lead = top[0]
     return `AI評価: 上位${top.length}件中${positive}件が伸長。${lead.name}はボリューム管理が良好です。疲労感が強い日はセット数を微調整しましょう。`
   }, [growthRankings.volumeTop])
-
-  const aiErrorDisplay = useMemo(() => {
-    if (!aiError) {
-      return null
-    }
-
-    const raw = aiError
-    if (raw.includes('GEMINI_KEY_MISSING')) {
-      return {
-        title: 'Gemini APIキーが未設定です',
-        message: '設定タブで「Google Gemini」を選んだ場合は、Gemini APIキーの保存が必要です。',
-        detail: null as string | null,
-      }
-    }
-
-    if (raw.includes('insufficient_quota')) {
-      return {
-        title: 'AI利用枠が不足しています',
-        message: 'このAPIキーのクレジット上限に達しています。課金設定または別のAPIキーへ切り替えてください（履歴ベースのローカル分析は継続表示されます）。',
-        detail: raw,
-      }
-    }
-
-    if (raw.includes('invalid_api_key') || raw.includes('API key not valid') || raw.includes('API_KEY_INVALID')) {
-      return {
-        title: 'APIキーが正しくありません',
-        message: `${aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} のAPIキー形式・有効状態を確認してください。`,
-        detail: raw,
-      }
-    }
-
-    if (raw.includes('incorrect_api_key_provided')) {
-      return {
-        title: 'APIキーが一致していません',
-        message: '入力したキーに誤字・欠けがある可能性があります。先頭/末尾の空白も確認してください。',
-        detail: raw,
-      }
-    }
-
-    if (raw.includes('does not have access to model') || raw.includes('model_not_found')) {
-      return {
-        title: 'このキーではモデルを利用できません',
-        message: 'APIキーの権限またはプランの対象外です。別モデル対応キーへ切り替えるか、課金設定をご確認ください。',
-        detail: raw,
-      }
-    }
-
-    if (raw.includes('rate_limit_exceeded')) {
-      return {
-        title: 'リクエスト上限に達しました',
-        message: '短時間に呼び出しが集中しています。数十秒待って再度お試しください。',
-        detail: raw,
-      }
-    }
-
-    if (raw.includes('model') && raw.includes('not found')) {
-      return {
-        title: '利用モデルにアクセスできません',
-        message: '選択したモデルが利用不可の可能性があります。キーの権限かAPI提供状況を確認してください。',
-        detail: raw,
-      }
-    }
-
-    if (raw.includes('Google Gemini API error')) {
-      return {
-        title: 'Gemini API通信で失敗しました',
-        message: 'Gemini側の設定またはAPIキー権限でエラーが発生しました。',
-        detail: raw,
-      }
-    }
-
-    if (raw.includes('OpenAI API error')) {
-      return {
-        title: 'OpenAI API通信で失敗しました',
-        message: 'OpenAI側の設定または利用枠でエラーが発生しました。',
-        detail: raw,
-      }
-    }
-
-    return {
-      title: 'AI分析を取得できませんでした',
-      message: '通信環境を確認して再度お試しください。改善しない場合はAPIキー設定をご確認ください。',
-      detail: raw,
-    }
-  }, [aiError, aiProvider])
 
   const recoveryAlerts = useMemo(() => {
     const alerts: string[] = []
@@ -2551,46 +2443,6 @@ function App() {
       setIsSavingWorkout(false)
     }
   }
-
-  useEffect(() => {
-    if (tab !== 'analytics') {
-      return
-    }
-    if (sessions.length === 0) {
-      setAiFeedback([])
-      setAiError(null)
-      setAiLoading(false)
-      return
-    }
-
-    let active = true
-    setAiLoading(true)
-    setAiError(null)
-    const apiKey = aiProvider === 'gemini' ? geminiApiKey : openaiApiKey
-    void requestAiFeedback(sessions, apiKey, aiProvider)
-      .then((feedback) => {
-        if (!active) {
-          return
-        }
-        setAiFeedback(feedback)
-      })
-      .catch((error) => {
-        if (!active) {
-          return
-        }
-        setAiError(error instanceof Error ? error.message : 'AI分析の自動更新に失敗しました。')
-      })
-      .finally(() => {
-        if (!active) {
-          return
-        }
-        setAiLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [sessions, tab, openaiApiKey, geminiApiKey, aiProvider])
 
   async function logout() {
     if (!auth) {
@@ -3279,32 +3131,14 @@ function App() {
           <div className="row analytics-header-row">
             <h2>分析</h2>
           </div>
-          {aiErrorDisplay && (
-            <section className="analytics-error-card" role="status" aria-live="polite">
-              <p className="analytics-error-title">{aiErrorDisplay.title}</p>
-              <p className="analytics-error-message">{aiErrorDisplay.message}</p>
-              {aiErrorDisplay.detail && (
-                <details className="analytics-error-detail">
-                  <summary>詳細エラー</summary>
-                  <p>{aiErrorDisplay.detail}</p>
-                </details>
-              )}
-            </section>
-          )}
-          {aiLoading && <p className="analytics-loading-note">AI分析を自動更新中...</p>}
 
           <section className="analytics-ai-summary">
-            <h3>AI総合サマリー</h3>
-            {(aiFeedback.length > 0
-              ? [...aiFeedback.slice(0, 2), ...analyticsNarrativeSummary, ...analyticsLocalSummary]
-              : [...analyticsNarrativeSummary, ...analyticsLocalSummary])
+            <h3>総合サマリー</h3>
+            {[...analyticsNarrativeSummary, ...analyticsLocalSummary]
               .slice(0, isProUnlocked ? 6 : 4)
               .map((text) => (
               <p key={text} className="feedback-line">・{text}</p>
             ))}
-            {aiErrorDisplay && (
-              <p className="analytics-source-note">外部AIでエラーが出たため、現在は履歴ベースのローカル分析を優先表示しています。</p>
-            )}
             {!isProUnlocked && (
               <p className="analytics-pro-teaser">Proで詳細サマリーをさらに表示</p>
             )}
@@ -3407,120 +3241,6 @@ function App() {
           <h2>設定</h2>
           <p>プロフィール: {user?.email ?? 'デモユーザー'}</p>
           {authError && <p className="error">{authError}</p>}
-           
-          <div className="settings-section">
-            <label htmlFor="ai-provider">
-              <strong>AI プロバイダ</strong>
-              <p className="settings-hint">ホーム / 分析のAIメッセージに使用する AI を選択してください。</p>
-              <select
-                id="ai-provider"
-                value={aiProvider}
-                onChange={(event) => {
-                  const value = event.currentTarget.value as 'openai' | 'gemini'
-                  setAiProvider(value)
-                  window.localStorage.setItem('atlas.ai-provider.v1', value)
-                }}
-                className="settings-input"
-              >
-                <option value="openai">OpenAI (ChatGPT)</option>
-                <option value="gemini">Google Gemini</option>
-              </select>
-            </label>
-          </div>
-           
-          {aiProvider === 'openai' && (
-            <div className="settings-section">
-              <label htmlFor="openai-api-key">
-                <strong>OpenAI API キー</strong>
-                 <p className="settings-hint">ChatGPT のアカウントから API キーを取得して貼り付けてください。ホーム / 分析のAIメッセージに使用されます。</p>
-                <input
-                  id="openai-api-key"
-                  type="password"
-                  value={openaiApiKeyDraft}
-                   onChange={(event) => {
-                     const next = event.currentTarget.value
-                     setOpenaiApiKeyDraft(next)
-                     setOpenaiApiKey(next.trim())
-                     window.localStorage.setItem('atlas.openai-api-key.v1', next.trim())
-                   }}
-                   placeholder="sk-proj-..."
-                   className="settings-input"
-                 />
-              </label>
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={() => {
-                  window.localStorage.setItem('atlas.openai-api-key.v1', openaiApiKeyDraft.trim())
-                  setOpenaiApiKey(openaiApiKeyDraft.trim())
-                  showToast(openaiApiKeyDraft.trim() ? 'API キーを保存しました' : 'API キーを削除しました')
-                }}
-              >
-                {openaiApiKey ? 'API キーを更新' : 'API キーを設定'}
-              </button>
-              {openaiApiKey && (
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  onClick={() => {
-                    window.localStorage.removeItem('atlas.openai-api-key.v1')
-                    setOpenaiApiKey('')
-                    setOpenaiApiKeyDraft('')
-                    showToast('API キーを削除しました')
-                  }}
-                >
-                  API キーを削除
-                </button>
-              )}
-            </div>
-          )}
-
-          {aiProvider === 'gemini' && (
-            <div className="settings-section">
-              <label htmlFor="gemini-api-key">
-                <strong>Google Gemini API キー</strong>
-                <p className="settings-hint">Google AI Studio から API キーを取得して貼り付けてください。ホーム / 分析のAIメッセージに使用されます。</p>
-                <input
-                  id="gemini-api-key"
-                  type="password"
-                  value={geminiApiKeyDraft}
-                  onChange={(event) => {
-                    const next = event.currentTarget.value
-                    setGeminiApiKeyDraft(next)
-                    setGeminiApiKey(next.trim())
-                    window.localStorage.setItem('atlas.gemini-api-key.v1', next.trim())
-                  }}
-                  placeholder="AIzaSy..."
-                  className="settings-input"
-                />
-              </label>
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={() => {
-                  window.localStorage.setItem('atlas.gemini-api-key.v1', geminiApiKeyDraft.trim())
-                  setGeminiApiKey(geminiApiKeyDraft.trim())
-                  showToast(geminiApiKeyDraft.trim() ? 'API キーを保存しました' : 'API キーを削除しました')
-                }}
-              >
-                {geminiApiKey ? 'API キーを更新' : 'API キーを設定'}
-              </button>
-              {geminiApiKey && (
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  onClick={() => {
-                    window.localStorage.removeItem('atlas.gemini-api-key.v1')
-                    setGeminiApiKey('')
-                    setGeminiApiKeyDraft('')
-                    showToast('API キーを削除しました')
-                  }}
-                >
-                  API キーを削除
-                </button>
-              )}
-            </div>
-          )}
 
           <div className="settings-section">
             <label>
