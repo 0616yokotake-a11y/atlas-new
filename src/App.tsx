@@ -1007,6 +1007,8 @@ function App() {
   const [pickerValue, setPickerValue] = useState(0)
   const [isSavingWorkout, setIsSavingWorkout] = useState(false)
   const [toastState, setToastState] = useState<{ message: string; tone: 'default' | 'error' } | null>(null)
+  const [isRestTimerExpanded, setIsRestTimerExpanded] = useState(false)
+  const [restTimerNotice, setRestTimerNotice] = useState<string | null>(null)
   const [isLandscapeBlocked, setIsLandscapeBlocked] = useState(false)
   const [exerciseSetDrafts, setExerciseSetDrafts] = useState<
     Record<string, Array<Pick<ExerciseSet, 'weight' | 'reps'>>>
@@ -1019,6 +1021,7 @@ function App() {
   const lastWheelHapticValueRef = useRef<number | null>(null)
   const pickerOpenValueRef = useRef(0)
   const toastTimerRef = useRef<number | null>(null)
+  const restTimerNoticeRef = useRef<number | null>(null)
   const previousStreakDaysRef = useRef<number | null>(null)
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
   const previousMainTabRef = useRef<MainTab>('home')
@@ -1046,7 +1049,8 @@ function App() {
         if (previous <= 1) {
           window.clearInterval(timer)
           setTimerRunning(false)
-          triggerHaptic([120, 80, 120])
+          triggerHaptic([40, 60, 40])
+          showRestTimerNotice('⏱️ 休憩終了！次セットいこう')
           return 0
         }
 
@@ -1147,6 +1151,9 @@ function App() {
     return () => {
       if (toastTimerRef.current) {
         window.clearTimeout(toastTimerRef.current)
+      }
+      if (restTimerNoticeRef.current) {
+        window.clearTimeout(restTimerNoticeRef.current)
       }
       if (wheelScrollTimerRef.current) {
         window.clearTimeout(wheelScrollTimerRef.current)
@@ -1768,6 +1775,15 @@ function App() {
     )
   }, [selectedExercise, sets, workoutPhase])
 
+  const restTimerLabel = `${String(Math.floor(restSeconds / 60)).padStart(2, '0')}:${String(restSeconds % 60).padStart(2, '0')}`
+  const shouldShowRestTimerFloating = (tab === 'workout' && workoutPhase === 'record') || timerRunning
+
+  useEffect(() => {
+    if (!shouldShowRestTimerFloating) {
+      setIsRestTimerExpanded(false)
+    }
+  }, [shouldShowRestTimerFloating])
+
   function vibrateAndSetTab(nextTab: AppTab, pattern: number | number[] = 12) {
     if (nextTab !== tab) {
       triggerHaptic(pattern)
@@ -2371,6 +2387,24 @@ function App() {
     })
   }
 
+  function toggleRestTimerRunning() {
+    triggerHaptic(timerRunning ? 14 : 20)
+    resetCompleteConfirm()
+    setTimerRunning((previous) => {
+      if (!previous && restSeconds === 0) {
+        setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
+      }
+      return !previous
+    })
+  }
+
+  function resetRestTimer() {
+    triggerHaptic(12)
+    resetCompleteConfirm()
+    setTimerRunning(false)
+    setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
+  }
+
   function resetCompleteConfirm() {
     return
   }
@@ -2392,6 +2426,17 @@ function App() {
       setToastState(null)
       toastTimerRef.current = null
     }, 2200)
+  }
+
+  function showRestTimerNotice(message: string) {
+    setRestTimerNotice(message)
+    if (restTimerNoticeRef.current) {
+      window.clearTimeout(restTimerNoticeRef.current)
+    }
+    restTimerNoticeRef.current = window.setTimeout(() => {
+      setRestTimerNotice(null)
+      restTimerNoticeRef.current = null
+    }, 3200)
   }
 
   function startWorkoutFlow(forceReset = false) {
@@ -2839,63 +2884,6 @@ function App() {
                 >
                   {isSavingWorkout ? '保存中...' : '保存して終了'}
                 </button>
-              </div>
-              <div className="timer">
-                <h3>休憩タイマー</h3>
-                <div className="timer-adjust">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic(10)
-                      adjustRestSeconds(-15)
-                    }}
-                    disabled={timerRunning}
-                  >
-                    －
-                  </button>
-                  <p>
-                    {String(Math.floor(restSeconds / 60)).padStart(2, '0')}:
-                    {String(restSeconds % 60).padStart(2, '0')}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic(10)
-                      adjustRestSeconds(15)
-                    }}
-                    disabled={timerRunning}
-                  >
-                    ＋
-                  </button>
-                </div>
-                <div className="action-row">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic(timerRunning ? 14 : 20)
-                      resetCompleteConfirm()
-                      setTimerRunning((previous) => {
-                        if (!previous && restSeconds === 0) {
-                          setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
-                        }
-                        return !previous
-                      })
-                    }}
-                  >
-                    {timerRunning ? 'STOP' : 'START'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic(12)
-                      resetCompleteConfirm()
-                      setTimerRunning(false)
-                      setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
-                    }}
-                  >
-                    リセット
-                  </button>
-                </div>
               </div>
             </div>
           )}
@@ -3494,6 +3482,57 @@ function App() {
       )}
 
       {toastState && <div className={`toast ${toastState.tone === 'error' ? 'toast-error' : ''}`}>{toastState.message}</div>}
+      {restTimerNotice && <div className="rest-timer-notice">{restTimerNotice}</div>}
+      {shouldShowRestTimerFloating && (
+        <div className={`rest-timer-floating ${isRestTimerExpanded ? 'expanded' : ''}`}>
+          <button
+            type="button"
+            className={`rest-timer-fab-toggle ${timerRunning ? 'running' : ''}`}
+            onClick={() => {
+              triggerHaptic(10)
+              setIsRestTimerExpanded((previous) => !previous)
+            }}
+          >
+            <span>休憩</span>
+            <strong>{restTimerLabel}</strong>
+          </button>
+          {isRestTimerExpanded && (
+            <div className="rest-timer-floating-panel">
+              <div className="timer-adjust">
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(10)
+                    adjustRestSeconds(-15)
+                  }}
+                  disabled={timerRunning}
+                >
+                  －
+                </button>
+                <p>{restTimerLabel}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(10)
+                    adjustRestSeconds(15)
+                  }}
+                  disabled={timerRunning}
+                >
+                  ＋
+                </button>
+              </div>
+              <div className="action-row">
+                <button type="button" onClick={toggleRestTimerRunning}>
+                  {timerRunning ? 'STOP' : 'START'}
+                </button>
+                <button type="button" onClick={resetRestTimer}>
+                  リセット
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <nav className="bottom-nav">
         <button type="button" onClick={() => vibrateAndSetTab('home', 10)} className={tab === 'home' ? 'active' : ''}>
