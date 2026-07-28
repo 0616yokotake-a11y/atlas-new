@@ -1952,10 +1952,10 @@ function App() {
       )
 
     return {
-      weightTop: weightRanking.slice(0, 3),
-      weightHiddenCount: Math.max(0, weightRanking.length - 3),
-      volumeTop: volumeRanking.slice(0, 3),
-      volumeHiddenCount: Math.max(0, volumeRanking.length - 3),
+      weightTop: weightRanking.slice(0, 1),
+      weightHiddenCount: Math.max(0, weightRanking.length - 1),
+      volumeTop: volumeRanking.slice(0, 1),
+      volumeHiddenCount: Math.max(0, volumeRanking.length - 1),
     }
   }, [analyticsWindowDays, sessions])
 
@@ -2017,6 +2017,134 @@ function App() {
     const lead = top[0]
     return `AI評価: 上位${top.length}件中${positive}件が伸長。${lead.name}はボリューム管理が良好です。疲労感が強い日はセット数を微調整しましょう。`
   }, [growthRankings.volumeTop])
+
+  const aiErrorDisplay = useMemo(() => {
+    if (!aiError) {
+      return null
+    }
+
+    const raw = aiError
+    if (raw.includes('GEMINI_KEY_MISSING')) {
+      return {
+        title: 'Gemini APIキーが未設定です',
+        message: '設定タブで「Google Gemini」を選んだ場合は、Gemini APIキーの保存が必要です。',
+        detail: null as string | null,
+      }
+    }
+
+    if (raw.includes('insufficient_quota')) {
+      return {
+        title: 'AI利用枠が不足しています',
+        message: 'このAPIキーのクレジット上限に達しています。課金設定または別のAPIキーへ切り替えてください。',
+        detail: raw,
+      }
+    }
+
+    if (raw.includes('invalid_api_key') || raw.includes('API key not valid') || raw.includes('API_KEY_INVALID')) {
+      return {
+        title: 'APIキーが正しくありません',
+        message: `${aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'} のAPIキー形式・有効状態を確認してください。`,
+        detail: raw,
+      }
+    }
+
+    if (raw.includes('model') && raw.includes('not found')) {
+      return {
+        title: '利用モデルにアクセスできません',
+        message: '選択したモデルが利用不可の可能性があります。キーの権限かAPI提供状況を確認してください。',
+        detail: raw,
+      }
+    }
+
+    if (raw.includes('Google Gemini API error')) {
+      return {
+        title: 'Gemini API通信で失敗しました',
+        message: 'Gemini側の設定またはAPIキー権限でエラーが発生しました。',
+        detail: raw,
+      }
+    }
+
+    if (raw.includes('OpenAI API error')) {
+      return {
+        title: 'OpenAI API通信で失敗しました',
+        message: 'OpenAI側の設定または利用枠でエラーが発生しました。',
+        detail: raw,
+      }
+    }
+
+    return {
+      title: 'AI分析を取得できませんでした',
+      message: '通信環境を確認して再度お試しください。改善しない場合はAPIキー設定をご確認ください。',
+      detail: raw,
+    }
+  }, [aiError, aiProvider])
+
+  const analyticsPriorityBodyParts = useMemo(() => {
+    return [...daysSinceByBodyPart]
+      .sort((left, right) => right.days - left.days)
+      .slice(0, 3)
+      .map((item) => {
+        if (item.days === 999) {
+          return { part: item.part, label: '未実施（最優先）' }
+        }
+        if (item.days === 0) {
+          return { part: item.part, label: '今日実施済み' }
+        }
+        if (item.days >= 7) {
+          return { part: item.part, label: `${item.days}日空き（優先）` }
+        }
+        return { part: item.part, label: `${item.days}日休養` }
+      })
+  }, [daysSinceByBodyPart])
+
+  const recoveryAlerts = useMemo(() => {
+    const alerts: string[] = []
+    const now = dayjs()
+    const recentPartCounts = new Map<BodyPart, number>()
+    sessions
+      .filter((session) => now.diff(dayjs(session.date), 'day') <= 2)
+      .forEach((session) => {
+        recentPartCounts.set(session.bodyPart, (recentPartCounts.get(session.bodyPart) ?? 0) + 1)
+      })
+
+    const overloadParts = Array.from(recentPartCounts.entries())
+      .filter(([, count]) => count >= 2)
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 2)
+
+    overloadParts.forEach(([part, count]) => {
+      alerts.push(`${part}は直近3日で${count}回。疲労兆候があるため、フォーム重視か負荷調整を推奨。`)
+    })
+
+    const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
+    if (previousWindowVolume > 0) {
+      const increaseRate = ((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100
+      if (increaseRate >= 25) {
+        alerts.push(`総ボリュームが前期間比+${Math.round(increaseRate)}%。疲労管理のため睡眠・休養を優先しましょう。`)
+      }
+    }
+
+    if (alerts.length === 0) {
+      alerts.push('強い過負荷シグナルは検知されませんでした。現状のペースは安定しています。')
+    }
+
+    return alerts.slice(0, 3)
+  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, previousWindowVolume, sessions])
+
+  const bodyPartWindowCounts = useMemo(() => {
+    const now = dayjs()
+    return BODY_PARTS.map((part) => {
+      const count = sessions.filter((session) => {
+        const diff = now.diff(dayjs(session.date), 'day')
+        return session.bodyPart === part && diff >= 0 && diff < analyticsWindowDays
+      }).length
+      return { part, count }
+    })
+  }, [analyticsWindowDays, sessions])
+
+  const bodyPartWindowMaxCount = useMemo(() => {
+    return bodyPartWindowCounts.reduce((max, item) => Math.max(max, item.count), 1)
+  }, [bodyPartWindowCounts])
 
   async function handleAuth(email: string, password: string, mode: AuthMode) {
     if (!auth) {
@@ -3066,7 +3194,18 @@ function App() {
           <div className="row analytics-header-row">
             <h2>分析</h2>
           </div>
-          {aiError && <p className="error">{aiError}</p>}
+          {aiErrorDisplay && (
+            <section className="analytics-error-card" role="status" aria-live="polite">
+              <p className="analytics-error-title">{aiErrorDisplay.title}</p>
+              <p className="analytics-error-message">{aiErrorDisplay.message}</p>
+              {aiErrorDisplay.detail && (
+                <details className="analytics-error-detail">
+                  <summary>詳細エラー</summary>
+                  <p>{aiErrorDisplay.detail}</p>
+                </details>
+              )}
+            </section>
+          )}
           {aiLoading && <p className="analytics-loading-note">AI分析を自動更新中...</p>}
 
           <section className="analytics-ai-summary">
@@ -3134,6 +3273,43 @@ function App() {
               <p className="analytics-ranking-insight">{volumeRankingInsight}</p>
             </article>
           </section>
+
+          <section className="analytics-insight-grid">
+            <article className="analytics-ranking-card">
+              <h3>次回優先部位</h3>
+              {analyticsPriorityBodyParts.map((item) => (
+                <div key={`priority-${item.part}`} className="analytics-priority-item">
+                  <strong>{item.part}</strong>
+                  <span>{item.label}</span>
+                </div>
+              ))}
+            </article>
+
+            <article className="analytics-ranking-card">
+              <h3>疲労・回復アラート</h3>
+              {recoveryAlerts.map((alert) => (
+                <p key={alert} className="analytics-alert-line">・{alert}</p>
+              ))}
+            </article>
+          </section>
+
+          <article className="analytics-ranking-card">
+            <h3>{analyticsWindowDays === 7 ? '直近7日' : '直近30日'}の部位実施バランス</h3>
+            <div className="analytics-balance-list">
+              {bodyPartWindowCounts.map((item) => (
+                <div key={`balance-${item.part}`} className="analytics-balance-row">
+                  <span>{item.part}</span>
+                  <div className="analytics-balance-track">
+                    <div
+                      className="analytics-balance-fill"
+                      style={{ width: `${Math.round((item.count / bodyPartWindowMaxCount) * 100)}%` }}
+                    />
+                  </div>
+                  <strong>{item.count}回</strong>
+                </div>
+              ))}
+            </div>
+          </article>
         </section>
       )}
 

@@ -52,11 +52,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
   try {
     const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`,
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
         },
         body: JSON.stringify({
           contents: [
@@ -94,7 +95,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     }
 
     // JSON を抽出（Gemini は JSON のみを返さないことがある）
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    const cleaned = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '')
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
       res.status(502).json({ error: 'Gemini レスポンスから JSON を抽出できません。' })
       return

@@ -837,6 +837,11 @@ button.secondary-btn {
   gap: 8px;
 }
 
+.analytics-insight-grid {
+  display: grid;
+  gap: 8px;
+}
+
 .analytics-ranking-item {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -887,10 +892,111 @@ button.secondary-btn {
   background: rgba(8, 47, 73, 0.24);
 }
 
+.analytics-priority-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 8px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.46);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.analytics-priority-item strong {
+  color: #e2e8f0;
+  font-size: 0.84rem;
+}
+
+.analytics-priority-item span {
+  color: #cbd5e1;
+  font-size: 0.76rem;
+}
+
+.analytics-alert-line {
+  margin: 0;
+  color: #dbeafe;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.analytics-balance-list {
+  display: grid;
+  gap: 7px;
+}
+
+.analytics-balance-row {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.analytics-balance-row span {
+  color: #e2e8f0;
+  font-size: 0.76rem;
+}
+
+.analytics-balance-row strong {
+  color: #bae6fd;
+  font-size: 0.74rem;
+}
+
+.analytics-balance-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(51, 65, 85, 0.85);
+  overflow: hidden;
+}
+
+.analytics-balance-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.86), rgba(129, 140, 248, 0.86));
+  min-width: 2px;
+}
+
 .analytics-loading-note {
   margin: -2px 0 0;
   color: #93c5fd;
   font-size: 0.74rem;
+}
+
+.analytics-error-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.42);
+  background: linear-gradient(135deg, rgba(69, 10, 10, 0.3), rgba(30, 41, 59, 0.45));
+}
+
+.analytics-error-title {
+  margin: 0;
+  color: #fee2e2;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.analytics-error-message {
+  margin: 0;
+  color: #fecdd3;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.analytics-error-detail summary {
+  cursor: pointer;
+  color: #fda4af;
+  font-size: 0.74rem;
+}
+
+.analytics-error-detail p {
+  margin: 6px 0 0;
+  color: #fecaca;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .analytics-ranking-insight {

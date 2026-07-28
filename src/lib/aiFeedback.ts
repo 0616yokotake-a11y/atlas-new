@@ -9,6 +9,12 @@ export async function requestAiFeedback(
   userApiKey?: string,
   provider: 'openai' | 'gemini' = 'openai',
 ): Promise<string[]> {
+  const trimmedApiKey = userApiKey?.trim() ?? ''
+
+  if (provider === 'gemini' && !trimmedApiKey) {
+    throw new Error('GEMINI_KEY_MISSING')
+  }
+
   if (!userApiKey) {
     // サーバー側キーを使用（OpenAI のみ）
     const response = await fetch('/api/analyze', {
@@ -39,7 +45,7 @@ export async function requestAiFeedback(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ sessions, apiKey: userApiKey }),
+    body: JSON.stringify({ sessions, apiKey: trimmedApiKey }),
   })
 
   if (!response.ok) {
