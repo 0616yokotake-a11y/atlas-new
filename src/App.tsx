@@ -3056,17 +3056,17 @@ function App() {
         </button>
         <button
           type="button"
-          onClick={() => vibrateAndSetTab('analytics', 10)}
-          className={`analytics-cta ${tab === 'analytics' ? 'active' : ''}`}
-        >
-          分析
-        </button>
-        <button
-          type="button"
           onClick={() => startWorkoutFlow(false)}
           className={tab === 'workout' ? 'active' : ''}
         >
           ワーク
+        </button>
+        <button
+          type="button"
+          onClick={() => vibrateAndSetTab('analytics', 10)}
+          className={`analytics-cta ${tab === 'analytics' ? 'active' : ''}`}
+        >
+          分析
         </button>
         <button
           type="button"
