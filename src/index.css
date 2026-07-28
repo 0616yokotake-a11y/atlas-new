@@ -1811,14 +1811,14 @@ button.secondary-btn {
 }
 
 .rest-timer-fab-toggle {
-  min-height: 54px;
-  min-width: 136px;
+  min-height: 60px;
+  min-width: 146px;
   border-radius: 999px;
   display: grid;
   grid-template-columns: auto auto;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
+  gap: 9px;
+  padding: 0 18px;
   background:
     radial-gradient(120% 130% at 0% 0%, rgba(56, 189, 248, 0.4), transparent 72%),
     rgba(8, 47, 73, 0.94);
@@ -1830,12 +1830,12 @@ button.secondary-btn {
 
 .rest-timer-fab-toggle span {
   color: #bae6fd;
-  font-size: 0.82rem;
+  font-size: 0.86rem;
 }
 
 .rest-timer-fab-toggle strong {
   color: #f8fafc;
-  font-size: 1rem;
+  font-size: 1.06rem;
   letter-spacing: 0.04em;
 }
 
@@ -1844,6 +1844,12 @@ button.secondary-btn {
   background:
     radial-gradient(120% 130% at 0% 0%, rgba(74, 222, 128, 0.26), transparent 72%),
     rgba(6, 78, 59, 0.92);
+}
+
+.rest-timer-drag-hint {
+  color: #93c5fd;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
 }
 
 .rest-timer-floating-panel {
