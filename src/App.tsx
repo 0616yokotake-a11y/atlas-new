@@ -1945,6 +1945,65 @@ function App() {
     }
   }, [analyticsWindowDays, sessions])
 
+  const previousWindowVolume = useMemo(() => {
+    const now = dayjs()
+    return sessions
+      .filter((session) => {
+        const diff = now.diff(dayjs(session.date), 'day')
+        return diff >= analyticsWindowDays && diff < analyticsWindowDays * 2
+      })
+      .flatMap((session) => session.exercises)
+      .flatMap((exercise) => exercise.sets)
+      .reduce((sum, set) => sum + set.weight * set.reps, 0)
+  }, [analyticsWindowDays, sessions])
+
+  const analyticsLocalSummary = useMemo(() => {
+    const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
+    const volumeDeltaLabel =
+      previousWindowVolume <= 0
+        ? currentWindowVolume > 0
+          ? 'NEW'
+          : '0%'
+        : `${Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100) >= 0 ? '+' : ''}${Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100)}%`
+    const staleParts = daysSinceByBodyPart.filter((item) => item.days >= 7 && item.days < 999).slice(0, 2)
+    const weightLeader = growthRankings.weightTop[0]
+    const volumeLeader = growthRankings.volumeTop[0]
+    const windowLabel = analyticsWindowDays === 7 ? '直近7日' : '直近30日'
+
+    return [
+      `${windowLabel}の総ボリュームは ${currentWindowVolume.toLocaleString()}kg（前期間比 ${volumeDeltaLabel}）。`,
+      weightLeader
+        ? `重量伸び率トップは ${weightLeader.name}（${weightLeader.weightGrowthLabel}）。最高重量は ${weightLeader.previousMaxWeight}kg → ${weightLeader.currentMaxWeight}kg。`
+        : '重量伸び率の比較対象データがまだ不足しています。',
+      volumeLeader
+        ? `総ボリューム伸び率トップは ${volumeLeader.name}（${volumeLeader.volumeGrowthLabel}）。`
+        : '総ボリューム伸び率の比較対象データがまだ不足しています。',
+      staleParts.length > 0
+        ? `${staleParts.map((item) => `${item.part}${item.days}日空き`).join(' / ')}。次回は優先的に実施推奨。`
+        : '部位の休養バランスは良好です。負荷更新フェーズに入れます。',
+    ]
+  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, daysSinceByBodyPart, growthRankings.volumeTop, growthRankings.weightTop, previousWindowVolume])
+
+  const weightRankingInsight = useMemo(() => {
+    const top = growthRankings.weightTop
+    if (top.length === 0) {
+      return 'AI評価: 比較対象データが不足しています。まず同種目を2期間分記録しましょう。'
+    }
+    const positive = top.filter((item) => item.weightGrowthLabel === 'NEW' || item.weightGrowthLabel.startsWith('+')).length
+    const lead = top[0]
+    return `AI評価: 上位${top.length}件中${positive}件が伸長。${lead.name}が牽引しています。停滞種目は可動域とセット品質の再確認がおすすめ。`
+  }, [growthRankings.weightTop])
+
+  const volumeRankingInsight = useMemo(() => {
+    const top = growthRankings.volumeTop
+    if (top.length === 0) {
+      return 'AI評価: 比較対象データが不足しています。まず同種目を2期間分記録しましょう。'
+    }
+    const positive = top.filter((item) => item.volumeGrowthLabel === 'NEW' || item.volumeGrowthLabel.startsWith('+')).length
+    const lead = top[0]
+    return `AI評価: 上位${top.length}件中${positive}件が伸長。${lead.name}はボリューム管理が良好です。疲労感が強い日はセット数を微調整しましょう。`
+  }, [growthRankings.volumeTop])
+
   async function handleAuth(email: string, password: string, mode: AuthMode) {
     if (!auth) {
       throw new Error('Firebase 設定が不足しています。')
@@ -2266,22 +2325,44 @@ function App() {
     }
   }
 
-  async function refreshAiFeedback() {
-    try {
-      if (sessions.length === 0) {
-        throw new Error('履歴がないためAI分析できません。')
-      }
-
-      setAiLoading(true)
-      setAiError(null)
-      const feedback = await requestAiFeedback(sessions)
-      setAiFeedback(feedback)
-    } catch (error) {
-      setAiError(error instanceof Error ? error.message : 'AI分析の更新に失敗しました。')
-    } finally {
-      setAiLoading(false)
+  useEffect(() => {
+    if (tab !== 'analytics') {
+      return
     }
-  }
+    if (sessions.length === 0) {
+      setAiFeedback([])
+      setAiError(null)
+      setAiLoading(false)
+      return
+    }
+
+    let active = true
+    setAiLoading(true)
+    setAiError(null)
+    void requestAiFeedback(sessions)
+      .then((feedback) => {
+        if (!active) {
+          return
+        }
+        setAiFeedback(feedback)
+      })
+      .catch((error) => {
+        if (!active) {
+          return
+        }
+        setAiError(error instanceof Error ? error.message : 'AI分析の自動更新に失敗しました。')
+      })
+      .finally(() => {
+        if (!active) {
+          return
+        }
+        setAiLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [sessions, tab])
 
   async function logout() {
     if (!auth) {
@@ -2969,15 +3050,13 @@ function App() {
         <section className="card analytics-screen-card">
           <div className="row analytics-header-row">
             <h2>分析</h2>
-            <button type="button" onClick={() => void refreshAiFeedback()} disabled={aiLoading}>
-              {aiLoading ? '更新中...' : 'AI分析を更新'}
-            </button>
           </div>
           {aiError && <p className="error">{aiError}</p>}
+          {aiLoading && <p className="analytics-loading-note">AI分析を自動更新中...</p>}
 
           <section className="analytics-ai-summary">
             <h3>AI総合サマリー</h3>
-            {(aiFeedback.length > 0 ? aiFeedback : analytics.fallbackSummary).slice(0, 2).map((text) => (
+            {(aiFeedback.length > 0 ? [...aiFeedback.slice(0, 2), ...analyticsLocalSummary] : analyticsLocalSummary).slice(0, 4).map((text) => (
               <p key={text} className="feedback-line">・{text}</p>
             ))}
           </section>
@@ -3020,6 +3099,7 @@ function App() {
               {growthRankings.weightHiddenCount > 0 && (
                 <p className="analytics-pro-teaser">+{growthRankings.weightHiddenCount}件は Pro で解放</p>
               )}
+              <p className="analytics-ranking-insight">{weightRankingInsight}</p>
             </article>
 
             <article className="analytics-ranking-card">
@@ -3036,15 +3116,8 @@ function App() {
               {growthRankings.volumeHiddenCount > 0 && (
                 <p className="analytics-pro-teaser">+{growthRankings.volumeHiddenCount}件は Pro で解放</p>
               )}
+              <p className="analytics-ranking-insight">{volumeRankingInsight}</p>
             </article>
-          </section>
-
-          <section className="analytics-volume-overview">
-            <h3>ボリューム</h3>
-            <p>週間: {analytics.weeklyTotal.toLocaleString()} kg</p>
-            <p>月間: {analytics.monthlyTotal.toLocaleString()} kg</p>
-            <p>年間: {analytics.yearlyTotal.toLocaleString()} kg</p>
-            <p>総重量: {analytics.allTotal.toLocaleString()} kg</p>
           </section>
         </section>
       )}

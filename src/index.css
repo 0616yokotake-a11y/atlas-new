@@ -793,12 +793,8 @@ button.secondary-btn {
 
 .analytics-screen-card {
   gap: 10px;
-  min-height: 0;
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-bottom: calc(12px + env(safe-area-inset-bottom));
-  -webkit-overflow-scrolling: touch;
+  overflow: visible;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
 }
 
 .analytics-header-row {
@@ -812,8 +808,7 @@ button.secondary-btn {
 }
 
 .analytics-ai-summary,
-.analytics-ranking-card,
-.analytics-volume-overview {
+.analytics-ranking-card {
   display: grid;
   gap: 6px;
   padding: 10px;
@@ -823,13 +818,16 @@ button.secondary-btn {
 }
 
 .analytics-period-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
   gap: 8px;
-  overflow: visible;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .analytics-period-row .chip-button {
+  flex: 1;
+  min-width: 0;
   min-height: 40px;
   justify-content: center;
 }
@@ -887,6 +885,19 @@ button.secondary-btn {
   border-radius: 9px;
   border: 1px dashed rgba(125, 211, 252, 0.34);
   background: rgba(8, 47, 73, 0.24);
+}
+
+.analytics-loading-note {
+  margin: -2px 0 0;
+  color: #93c5fd;
+  font-size: 0.74rem;
+}
+
+.analytics-ranking-insight {
+  margin: 2px 0 0;
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  line-height: 1.45;
 }
 
 .home-ai-line {
