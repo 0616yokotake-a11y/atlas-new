@@ -80,6 +80,11 @@ body {
   padding-bottom: calc(126px + env(safe-area-inset-bottom));
 }
 
+.app.has-fixed-nav.home-single-screen {
+  padding-top: calc(92px + env(safe-area-inset-top));
+  padding-bottom: calc(112px + env(safe-area-inset-bottom));
+}
+
 .app.no-scroll {
   overflow-y: auto;
   padding: calc(96px + env(safe-area-inset-top)) 0 calc(108px + env(safe-area-inset-bottom));
@@ -1115,7 +1120,7 @@ button.secondary-btn {
 .home-grid {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: clamp(4px, 0.7vh, 8px);
+  gap: clamp(3px, 0.6vh, 7px);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -1484,6 +1489,13 @@ button.secondary-btn {
   margin: 0;
   color: #e0f2fe;
   line-height: 1.6;
+}
+
+.analytics-source-note {
+  margin: 2px 0 0;
+  color: #93c5fd;
+  font-size: 0.74rem;
+  line-height: 1.4;
 }
 
 .exercise-guide-tip {
@@ -2092,4 +2104,9 @@ button.holding {
   color: #f8fafc;
   font-size: 16px;
   min-height: 44px;
+}
+
+.settings-pro-active {
+  border-color: rgba(125, 211, 252, 0.62);
+  background: linear-gradient(135deg, rgba(8, 47, 73, 0.52), rgba(30, 64, 175, 0.42));
 }

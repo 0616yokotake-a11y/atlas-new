@@ -53,6 +53,7 @@ const WHEEL_SIDE_PADDING = ((WHEEL_VISIBLE_ROWS - 1) / 2) * WHEEL_ITEM_HEIGHT
 const EXERCISE_PREFERENCES_STORAGE_KEY = 'atlas.exercise-preferences.v1'
 const EXERCISE_NOTES_STORAGE_KEY = 'atlas.exercise-notes.v1'
 const CUSTOM_EXERCISES_STORAGE_KEY = 'atlas.custom-exercises.v1'
+const PRO_UNLOCKED_STORAGE_KEY = 'atlas.pro-unlocked.v1'
 const PRESET_EXERCISE_NAMES = new Set(
   BODY_PARTS.flatMap((bodyPart) => EXERCISES_BY_BODY_PART[bodyPart]),
 )
@@ -1015,6 +1016,10 @@ function App() {
     return window.localStorage.getItem('atlas.gemini-api-key.v1') ?? ''
   })
   const [geminiApiKeyDraft, setGeminiApiKeyDraft] = useState(geminiApiKey)
+  const [isProUnlocked, setIsProUnlocked] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(PRO_UNLOCKED_STORAGE_KEY) === '1'
+  })
   const [exerciseInfoTarget, setExerciseInfoTarget] = useState<string | null>(null)
   const [pickerTarget, setPickerTarget] = useState<{ setId: string; key: 'weight' | 'reps' } | null>(null)
   const [pickerValue, setPickerValue] = useState(0)
@@ -2035,7 +2040,7 @@ function App() {
     if (raw.includes('insufficient_quota')) {
       return {
         title: 'AI利用枠が不足しています',
-        message: 'このAPIキーのクレジット上限に達しています。課金設定または別のAPIキーへ切り替えてください。',
+        message: 'このAPIキーのクレジット上限に達しています。課金設定または別のAPIキーへ切り替えてください（履歴ベースのローカル分析は継続表示されます）。',
         detail: raw,
       }
     }
@@ -2152,6 +2157,54 @@ function App() {
     return bodyPartWindowCounts.reduce((max, item) => Math.max(max, item.count), 1)
   }, [bodyPartWindowCounts])
 
+  const analyticsNarrativeSummary = useMemo(() => {
+    const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
+    const currentWindowSessions = sessions.filter((session) => {
+      const diff = dayjs().diff(dayjs(session.date), 'day')
+      return diff >= 0 && diff < analyticsWindowDays
+    }).length
+    const previousWindowSessions = sessions.filter((session) => {
+      const diff = dayjs().diff(dayjs(session.date), 'day')
+      return diff >= analyticsWindowDays && diff < analyticsWindowDays * 2
+    }).length
+    const topPart = [...bodyPartWindowCounts].sort((left, right) => right.count - left.count)[0]
+    const zeroParts = bodyPartWindowCounts.filter((item) => item.count === 0)
+    const sessionDelta = currentWindowSessions - previousWindowSessions
+    const volumeTrendPercent =
+      previousWindowVolume <= 0
+        ? currentWindowVolume > 0
+          ? null
+          : 0
+        : Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100)
+
+    const persona =
+      currentWindowSessions >= 4 && (volumeTrendPercent ?? 0) >= 10
+        ? '積み上げ型（頻度×負荷の両輪）'
+        : currentWindowSessions <= 2 && currentWindowVolume > 0
+          ? '高強度集中型'
+          : '安定維持型'
+
+    const action1 =
+      sessionDelta >= 2
+        ? 'この勢いなら、次の1回はフォーム精度に振るとケガなく伸びます。'
+        : sessionDelta <= -2
+          ? 'ペースが落ち気味なので、短時間セッションを1回挟むと再加速しやすいです。'
+          : '現状のペースは安定。次は弱点部位の1種目追加で伸びしろを作れます。'
+
+    const action2 =
+      zeroParts.length > 0
+        ? `未実施部位（${zeroParts.map((item) => item.part).join('・')}）を1回入れると、全体の伸びが安定します。`
+        : '全主要部位に刺激が入っています。次は苦手種目の回数更新を狙いましょう。'
+
+    return [
+      `あなたの直近傾向は「${persona}」。`,
+      topPart ? `主軸は${topPart.part}（${topPart.count}回）。この強みを軸に他部位へ波及させるフェーズです。` : '主軸部位の判定データが不足しています。',
+      volumeTrendPercent === null ? '前期間データがないため、今回の記録が新しい基準値になります。' : `総ボリュームは前期間比 ${volumeTrendPercent >= 0 ? '+' : ''}${volumeTrendPercent}%。`,
+      action1,
+      action2,
+    ]
+  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, bodyPartWindowCounts, previousWindowVolume, sessions])
+
   const bodyPartWindowCountsInsight = useMemo(() => {
     if (bodyPartWindowCounts.length === 0) {
       return 'AI評価: 回数データが不足しています。'
@@ -2174,6 +2227,9 @@ function App() {
 
     return `AI評価: 実施回数の偏りは小さめです。${top.part}を軸に、弱い部位を1回ずつ補強するとさらに安定します。`
   }, [bodyPartWindowCounts])
+
+  const visibleRankingCount = isProUnlocked ? 5 : 2
+  const visibleRecoveryAlerts = isProUnlocked ? recoveryAlerts : recoveryAlerts.slice(0, 1)
 
   async function handleAuth(email: string, password: string, mode: AuthMode) {
     if (!auth) {
@@ -3239,9 +3295,19 @@ function App() {
 
           <section className="analytics-ai-summary">
             <h3>AI総合サマリー</h3>
-            {(aiFeedback.length > 0 ? [...aiFeedback.slice(0, 2), ...analyticsLocalSummary] : analyticsLocalSummary).slice(0, 4).map((text) => (
+            {(aiFeedback.length > 0
+              ? [...aiFeedback.slice(0, 2), ...analyticsNarrativeSummary, ...analyticsLocalSummary]
+              : [...analyticsNarrativeSummary, ...analyticsLocalSummary])
+              .slice(0, isProUnlocked ? 6 : 4)
+              .map((text) => (
               <p key={text} className="feedback-line">・{text}</p>
             ))}
+            {aiErrorDisplay && (
+              <p className="analytics-source-note">外部AIでエラーが出たため、現在は履歴ベースのローカル分析を優先表示しています。</p>
+            )}
+            {!isProUnlocked && (
+              <p className="analytics-pro-teaser">Proで詳細サマリーをさらに表示</p>
+            )}
           </section>
 
           <div className="chip-row analytics-period-row">
@@ -3270,7 +3336,7 @@ function App() {
           <section className="analytics-ranking-grid">
             <article className="analytics-ranking-card">
               <h3>重量伸び率ランキング</h3>
-              {growthRankings.weightTop.map((item, index) => (
+              {growthRankings.weightTop.slice(0, visibleRankingCount).map((item, index) => (
                 <div key={`weight-${item.name}`} className="analytics-ranking-item">
                   <div className="analytics-ranking-main">
                     <strong>{index + 1}. {item.name}</strong>
@@ -3279,15 +3345,15 @@ function App() {
                   <span>{item.weightGrowthLabel}</span>
                 </div>
               ))}
-              {growthRankings.weightHiddenCount > 0 && (
-                <p className="analytics-pro-teaser">+{growthRankings.weightHiddenCount}件は Pro で解放</p>
+              {growthRankings.weightTop.length - visibleRankingCount > 0 && (
+                <p className="analytics-pro-teaser">+{growthRankings.weightTop.length - visibleRankingCount}件は Pro で解放</p>
               )}
               <p className="analytics-ranking-insight">{weightRankingInsight}</p>
             </article>
 
             <article className="analytics-ranking-card">
               <h3>総ボリューム伸び率ランキング</h3>
-              {growthRankings.volumeTop.map((item, index) => (
+              {growthRankings.volumeTop.slice(0, visibleRankingCount).map((item, index) => (
                 <div key={`volume-${item.name}`} className="analytics-ranking-item">
                   <div className="analytics-ranking-main">
                     <strong>{index + 1}. {item.name}</strong>
@@ -3296,8 +3362,8 @@ function App() {
                   <span>{item.volumeGrowthLabel}</span>
                 </div>
               ))}
-              {growthRankings.volumeHiddenCount > 0 && (
-                <p className="analytics-pro-teaser">+{growthRankings.volumeHiddenCount}件は Pro で解放</p>
+              {growthRankings.volumeTop.length - visibleRankingCount > 0 && (
+                <p className="analytics-pro-teaser">+{growthRankings.volumeTop.length - visibleRankingCount}件は Pro で解放</p>
               )}
               <p className="analytics-ranking-insight">{volumeRankingInsight}</p>
             </article>
@@ -3306,9 +3372,12 @@ function App() {
           <section className="analytics-insight-grid">
             <article className="analytics-ranking-card">
               <h3>疲労・回復アラート</h3>
-              {recoveryAlerts.map((alert) => (
+              {visibleRecoveryAlerts.map((alert) => (
                 <p key={alert} className="analytics-alert-line">・{alert}</p>
               ))}
+              {!isProUnlocked && recoveryAlerts.length - visibleRecoveryAlerts.length > 0 && (
+                <p className="analytics-pro-teaser">+{recoveryAlerts.length - visibleRecoveryAlerts.length}件は Pro で解放</p>
+              )}
             </article>
           </section>
 
@@ -3452,6 +3521,27 @@ function App() {
               )}
             </div>
           )}
+
+          <div className="settings-section">
+            <label>
+              <strong>Pro版（仮）</strong>
+              <p className="settings-hint">
+                無料版は一部コンテンツを制限し、Pro版（仮）で詳細サマリー・ランキング表示件数・疲労アラート件数を解放します。
+              </p>
+            </label>
+            <button
+              type="button"
+              className={`secondary-btn ${isProUnlocked ? 'settings-pro-active' : ''}`}
+              onClick={() => {
+                const next = !isProUnlocked
+                setIsProUnlocked(next)
+                window.localStorage.setItem(PRO_UNLOCKED_STORAGE_KEY, next ? '1' : '0')
+                showToast(next ? 'Pro版（仮）を有効化しました' : 'Pro版（仮）を解除しました')
+              }}
+            >
+              {isProUnlocked ? '課金状態（仮）: ON' : '課金する（仮）'}
+            </button>
+          </div>
 
           <button type="button" onClick={logout}>
             ログアウト
