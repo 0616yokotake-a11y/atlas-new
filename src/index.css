@@ -1106,24 +1106,25 @@ button.secondary-btn {
 .home-single-screen {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 0;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
 
 .home-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  flex: 1;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: clamp(4px, 0.7vh, 8px);
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   padding-bottom: 0;
 }
 
 .home-grid .card {
-  gap: 7px;
-  padding: 9px;
+  gap: clamp(5px, 0.8vh, 8px);
+  padding: clamp(8px, 1vh, 11px);
 }
 
 .home-primary-card {
@@ -1138,6 +1139,23 @@ button.secondary-btn {
 
 .home-graph-card {
   border-color: rgba(96, 165, 250, 0.28);
+  min-height: 0;
+}
+
+.home-primary-card {
+  min-height: 0;
+}
+
+.home-last-workout-card {
+  min-height: 0;
+}
+
+.home-grid .mini-chart {
+  min-height: clamp(64px, 11vh, 96px);
+}
+
+.home-single-screen .thumb-workout-cta {
+  min-height: clamp(54px, 8.2vh, 66px);
 }
 
 .workout-screen {
@@ -2072,6 +2090,6 @@ button.holding {
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 12px;
   color: #f8fafc;
-  font-size: 0.9rem;
+  font-size: 16px;
   min-height: 44px;
 }

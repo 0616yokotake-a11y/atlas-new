@@ -1952,10 +1952,10 @@ function App() {
       )
 
     return {
-      weightTop: weightRanking.slice(0, 1),
-      weightHiddenCount: Math.max(0, weightRanking.length - 1),
-      volumeTop: volumeRanking.slice(0, 1),
-      volumeHiddenCount: Math.max(0, volumeRanking.length - 1),
+      weightTop: weightRanking.slice(0, 5),
+      weightHiddenCount: Math.max(0, weightRanking.length - 5),
+      volumeTop: volumeRanking.slice(0, 5),
+      volumeHiddenCount: Math.max(0, volumeRanking.length - 5),
     }
   }, [analyticsWindowDays, sessions])
 
@@ -2048,6 +2048,30 @@ function App() {
       }
     }
 
+    if (raw.includes('incorrect_api_key_provided')) {
+      return {
+        title: 'APIキーが一致していません',
+        message: '入力したキーに誤字・欠けがある可能性があります。先頭/末尾の空白も確認してください。',
+        detail: raw,
+      }
+    }
+
+    if (raw.includes('does not have access to model') || raw.includes('model_not_found')) {
+      return {
+        title: 'このキーではモデルを利用できません',
+        message: 'APIキーの権限またはプランの対象外です。別モデル対応キーへ切り替えるか、課金設定をご確認ください。',
+        detail: raw,
+      }
+    }
+
+    if (raw.includes('rate_limit_exceeded')) {
+      return {
+        title: 'リクエスト上限に達しました',
+        message: '短時間に呼び出しが集中しています。数十秒待って再度お試しください。',
+        detail: raw,
+      }
+    }
+
     if (raw.includes('model') && raw.includes('not found')) {
       return {
         title: '利用モデルにアクセスできません',
@@ -2078,24 +2102,6 @@ function App() {
       detail: raw,
     }
   }, [aiError, aiProvider])
-
-  const analyticsPriorityBodyParts = useMemo(() => {
-    return [...daysSinceByBodyPart]
-      .sort((left, right) => right.days - left.days)
-      .slice(0, 3)
-      .map((item) => {
-        if (item.days === 999) {
-          return { part: item.part, label: '未実施（最優先）' }
-        }
-        if (item.days === 0) {
-          return { part: item.part, label: '今日実施済み' }
-        }
-        if (item.days >= 7) {
-          return { part: item.part, label: `${item.days}日空き（優先）` }
-        }
-        return { part: item.part, label: `${item.days}日休養` }
-      })
-  }, [daysSinceByBodyPart])
 
   const recoveryAlerts = useMemo(() => {
     const alerts: string[] = []
@@ -2144,6 +2150,29 @@ function App() {
 
   const bodyPartWindowMaxCount = useMemo(() => {
     return bodyPartWindowCounts.reduce((max, item) => Math.max(max, item.count), 1)
+  }, [bodyPartWindowCounts])
+
+  const bodyPartWindowCountsInsight = useMemo(() => {
+    if (bodyPartWindowCounts.length === 0) {
+      return 'AI評価: 回数データが不足しています。'
+    }
+
+    const sorted = [...bodyPartWindowCounts].sort((left, right) => right.count - left.count)
+    const top = sorted[0]
+    const bottom = sorted[sorted.length - 1]
+    if (!top || !bottom) {
+      return 'AI評価: 回数データが不足しています。'
+    }
+
+    if (top.count === 0) {
+      return 'AI評価: 期間内の記録がまだありません。ワークアウトを1件追加すると傾向分析が始まります。'
+    }
+
+    if (top.count - bottom.count >= 3) {
+      return `AI評価: ${top.part}に実施回数が偏っています。未実施/低頻度部位を週内に1回追加すると全身バランスが改善します。`
+    }
+
+    return `AI評価: 実施回数の偏りは小さめです。${top.part}を軸に、弱い部位を1回ずつ補強するとさらに安定します。`
   }, [bodyPartWindowCounts])
 
   async function handleAuth(email: string, password: string, mode: AuthMode) {
@@ -3276,16 +3305,6 @@ function App() {
 
           <section className="analytics-insight-grid">
             <article className="analytics-ranking-card">
-              <h3>次回優先部位</h3>
-              {analyticsPriorityBodyParts.map((item) => (
-                <div key={`priority-${item.part}`} className="analytics-priority-item">
-                  <strong>{item.part}</strong>
-                  <span>{item.label}</span>
-                </div>
-              ))}
-            </article>
-
-            <article className="analytics-ranking-card">
               <h3>疲労・回復アラート</h3>
               {recoveryAlerts.map((alert) => (
                 <p key={alert} className="analytics-alert-line">・{alert}</p>
@@ -3294,7 +3313,7 @@ function App() {
           </section>
 
           <article className="analytics-ranking-card">
-            <h3>{analyticsWindowDays === 7 ? '直近7日' : '直近30日'}の部位実施バランス</h3>
+            <h3>{analyticsWindowDays === 7 ? '直近7日' : '直近30日'}の部位別実施回数</h3>
             <div className="analytics-balance-list">
               {bodyPartWindowCounts.map((item) => (
                 <div key={`balance-${item.part}`} className="analytics-balance-row">
@@ -3309,6 +3328,7 @@ function App() {
                 </div>
               ))}
             </div>
+            <p className="analytics-ranking-insight">{bodyPartWindowCountsInsight}</p>
           </article>
         </section>
       )}
@@ -3322,7 +3342,7 @@ function App() {
           <div className="settings-section">
             <label htmlFor="ai-provider">
               <strong>AI プロバイダ</strong>
-              <p className="settings-hint">分析に使用する AI を選択してください。</p>
+              <p className="settings-hint">ホーム / 分析のAIメッセージに使用する AI を選択してください。</p>
               <select
                 id="ai-provider"
                 value={aiProvider}
@@ -3343,15 +3363,20 @@ function App() {
             <div className="settings-section">
               <label htmlFor="openai-api-key">
                 <strong>OpenAI API キー</strong>
-                <p className="settings-hint">ChatGPT のアカウントから API キーを取得して貼り付けてください。分析 AI にのみ使用されます。</p>
+                 <p className="settings-hint">ChatGPT のアカウントから API キーを取得して貼り付けてください。ホーム / 分析のAIメッセージに使用されます。</p>
                 <input
                   id="openai-api-key"
                   type="password"
                   value={openaiApiKeyDraft}
-                  onChange={(event) => setOpenaiApiKeyDraft(event.currentTarget.value)}
-                  placeholder="sk-proj-..."
-                  className="settings-input"
-                />
+                   onChange={(event) => {
+                     const next = event.currentTarget.value
+                     setOpenaiApiKeyDraft(next)
+                     setOpenaiApiKey(next.trim())
+                     window.localStorage.setItem('atlas.openai-api-key.v1', next.trim())
+                   }}
+                   placeholder="sk-proj-..."
+                   className="settings-input"
+                 />
               </label>
               <button
                 type="button"
@@ -3385,12 +3410,17 @@ function App() {
             <div className="settings-section">
               <label htmlFor="gemini-api-key">
                 <strong>Google Gemini API キー</strong>
-                <p className="settings-hint">Google AI Studio から API キーを取得して貼り付けてください。分析 AI にのみ使用されます。</p>
+                <p className="settings-hint">Google AI Studio から API キーを取得して貼り付けてください。ホーム / 分析のAIメッセージに使用されます。</p>
                 <input
                   id="gemini-api-key"
                   type="password"
                   value={geminiApiKeyDraft}
-                  onChange={(event) => setGeminiApiKeyDraft(event.currentTarget.value)}
+                  onChange={(event) => {
+                    const next = event.currentTarget.value
+                    setGeminiApiKeyDraft(next)
+                    setGeminiApiKey(next.trim())
+                    window.localStorage.setItem('atlas.gemini-api-key.v1', next.trim())
+                  }}
                   placeholder="AIzaSy..."
                   className="settings-input"
                 />
