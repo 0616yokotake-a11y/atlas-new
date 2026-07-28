@@ -1001,6 +1001,11 @@ function App() {
   const [aiFeedback, setAiFeedback] = useState<string[]>([])
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [openaiApiKey, setOpenaiApiKey] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return window.localStorage.getItem('atlas.openai-api-key.v1') ?? ''
+  })
+  const [openaiApiKeyDraft, setOpenaiApiKeyDraft] = useState(openaiApiKey)
   const [exerciseInfoTarget, setExerciseInfoTarget] = useState<string | null>(null)
   const [pickerTarget, setPickerTarget] = useState<{ setId: string; key: 'weight' | 'reps' } | null>(null)
   const [pickerValue, setPickerValue] = useState(0)
@@ -2339,7 +2344,7 @@ function App() {
     let active = true
     setAiLoading(true)
     setAiError(null)
-    void requestAiFeedback(sessions)
+    void requestAiFeedback(sessions, openaiApiKey)
       .then((feedback) => {
         if (!active) {
           return
@@ -2362,7 +2367,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [sessions, tab])
+  }, [sessions, tab, openaiApiKey])
 
   async function logout() {
     if (!auth) {
@@ -3127,6 +3132,47 @@ function App() {
           <h2>設定</h2>
           <p>プロフィール: {user?.email ?? 'デモユーザー'}</p>
           {authError && <p className="error">{authError}</p>}
+           
+          <div className="settings-section">
+            <label htmlFor="openai-api-key">
+              <strong>OpenAI API キー</strong>
+              <p className="settings-hint">ChatGPT のアカウントから API キーを取得して貼り付けてください。分析 AI にのみ使用されます。</p>
+              <input
+                id="openai-api-key"
+                type="password"
+                value={openaiApiKeyDraft}
+                onChange={(event) => setOpenaiApiKeyDraft(event.currentTarget.value)}
+                placeholder="sk-proj-..."
+                className="settings-input"
+              />
+            </label>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => {
+                window.localStorage.setItem('atlas.openai-api-key.v1', openaiApiKeyDraft.trim())
+                setOpenaiApiKey(openaiApiKeyDraft.trim())
+                showToast(openaiApiKeyDraft.trim() ? 'API キーを保存しました' : 'API キーを削除しました')
+              }}
+            >
+              {openaiApiKey ? 'API キーを更新' : 'API キーを設定'}
+            </button>
+            {openaiApiKey && (
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => {
+                  window.localStorage.removeItem('atlas.openai-api-key.v1')
+                  setOpenaiApiKey('')
+                  setOpenaiApiKeyDraft('')
+                  showToast('API キーを削除しました')
+                }}
+              >
+                API キーを削除
+              </button>
+            )}
+          </div>
+
           <button type="button" onClick={logout}>
             ログアウト
           </button>

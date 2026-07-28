@@ -4,15 +4,18 @@ type AiFeedbackResponse = {
   feedback: string[]
 }
 
-export async function requestAiFeedback(sessions: WorkoutSession[]): Promise<string[]> {
-  const response = await fetch('/api/analyze', {
+export async function requestAiFeedback(sessions: WorkoutSession[], userApiKey?: string): Promise<string[]> {
+  const endpoint = userApiKey ? '/api/analyze-with-user-key' : '/api/analyze'
+  const body = userApiKey
+    ? { sessions, apiKey: userApiKey }
+    : { sessions }
+
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      sessions,
-    }),
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {
