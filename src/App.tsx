@@ -2678,6 +2678,11 @@ function App() {
               <span className={workoutPhase === 'exercise' ? 'active' : ''}>2.種目</span>
             </div>
           )}
+          <p className="workout-affordance-hint">
+            {workoutPhase === 'record'
+              ? '重量・回数をタップして編集 → 保存して終了'
+              : 'カードをタップして次へ進みます'}
+          </p>
 
           {workoutPhase === 'body' && (
             <div className="step-panel">
@@ -2900,6 +2905,7 @@ function App() {
       {tab === 'history' && (
         <section className="card history-screen-card">
           <h2>履歴</h2>
+          <p className="history-affordance-hint">日付をタップで展開、長い一覧は「複数選択削除」からまとめて操作できます。</p>
           <div className="history-calendar-card">
             <div className="history-calendar-header">
               <button
