@@ -793,6 +793,22 @@ button.secondary-btn {
 
 .analytics-screen-card {
   gap: 10px;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling: touch;
+}
+
+.analytics-header-row {
+  align-items: center;
+}
+
+.analytics-header-row button {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 0.8rem;
 }
 
 .analytics-ai-summary,
@@ -807,7 +823,15 @@ button.secondary-btn {
 }
 
 .analytics-period-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  overflow: visible;
+}
+
+.analytics-period-row .chip-button {
+  min-height: 40px;
+  justify-content: center;
 }
 
 .analytics-ranking-grid {
@@ -816,30 +840,53 @@ button.secondary-btn {
 }
 
 .analytics-ranking-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   justify-content: space-between;
-  align-items: center;
+  align-items: start;
   gap: 10px;
   padding: 8px 9px;
   border-radius: 10px;
   background: rgba(30, 41, 59, 0.56);
   border: 1px solid rgba(148, 163, 184, 0.2);
+  min-width: 0;
+}
+
+.analytics-ranking-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
 }
 
 .analytics-ranking-item strong {
   font-size: 0.84rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.analytics-ranking-item small {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .analytics-ranking-item span {
   color: #bae6fd;
   font-weight: 700;
   font-size: 0.82rem;
+  white-space: nowrap;
+  align-self: center;
 }
 
 .analytics-pro-teaser {
   margin: 0;
   color: #93c5fd;
   font-size: 0.76rem;
+  padding: 7px 8px;
+  border-radius: 9px;
+  border: 1px dashed rgba(125, 211, 252, 0.34);
+  background: rgba(8, 47, 73, 0.24);
 }
 
 .home-ai-line {

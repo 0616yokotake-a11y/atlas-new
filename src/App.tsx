@@ -2967,7 +2967,7 @@ function App() {
 
       {tab === 'analytics' && (
         <section className="card analytics-screen-card">
-          <div className="row">
+          <div className="row analytics-header-row">
             <h2>分析</h2>
             <button type="button" onClick={() => void refreshAiFeedback()} disabled={aiLoading}>
               {aiLoading ? '更新中...' : 'AI分析を更新'}
@@ -3010,7 +3010,10 @@ function App() {
               <h3>重量伸び率ランキング</h3>
               {growthRankings.weightTop.map((item, index) => (
                 <div key={`weight-${item.name}`} className="analytics-ranking-item">
-                  <strong>{index + 1}. {item.name}</strong>
+                  <div className="analytics-ranking-main">
+                    <strong>{index + 1}. {item.name}</strong>
+                    <small>{item.previousMaxWeight}kg → {item.currentMaxWeight}kg</small>
+                  </div>
                   <span>{item.weightGrowthLabel}</span>
                 </div>
               ))}
@@ -3023,7 +3026,10 @@ function App() {
               <h3>総ボリューム伸び率ランキング</h3>
               {growthRankings.volumeTop.map((item, index) => (
                 <div key={`volume-${item.name}`} className="analytics-ranking-item">
-                  <strong>{index + 1}. {item.name}</strong>
+                  <div className="analytics-ranking-main">
+                    <strong>{index + 1}. {item.name}</strong>
+                    <small>{item.previousVolume.toLocaleString()}kg → {item.currentVolume.toLocaleString()}kg</small>
+                  </div>
                   <span>{item.volumeGrowthLabel}</span>
                 </div>
               ))}
