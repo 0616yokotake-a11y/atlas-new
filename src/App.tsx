@@ -988,6 +988,7 @@ function App() {
   const [historyMonthCursor, setHistoryMonthCursor] = useState(() => dayjs().startOf('month').format('YYYY-MM-DD'))
   const [historySelectedDate, setHistorySelectedDate] = useState<string | null>(null)
   const [historyOpenDates, setHistoryOpenDates] = useState<string[]>([])
+  const [analyticsWindowDays, setAnalyticsWindowDays] = useState<7 | 30>(7)
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState('')
   const [customExerciseInput, setCustomExerciseInput] = useState('')
   const [customExercisesByBodyPart, setCustomExercisesByBodyPart] = useState<
@@ -1807,10 +1808,6 @@ function App() {
   }, [exerciseInfoTarget])
 
   const analytics = useMemo(() => {
-    const frequency = BODY_PARTS.map((part) => ({
-      part,
-      count: sessions.filter((session) => session.bodyPart === part).length,
-    }))
     const now = dayjs()
     const weeklyTotal = sessions
       .filter((session) => now.diff(dayjs(session.date), 'day') < 7)
@@ -1833,14 +1830,120 @@ function App() {
       .reduce((sum, set) => sum + set.weight * set.reps, 0)
 
     const staleParts = daysSinceByBodyPart.filter((item) => item.days >= 7 && item.days < 999).slice(0, 2)
-    const feedback = [
-      `胸の実施回数は ${frequency.find((f) => f.part === '胸')?.count ?? 0} 回です。`,
-      ...staleParts.map((item) => `${item.part} は ${item.days} 日空いています。今週中の実施がおすすめです。`),
-      `直近7日間の総ボリュームは ${weeklyTotal.toLocaleString()} kg です。`,
+    const fallbackSummary = [
+      staleParts.length > 0
+        ? `${staleParts[0].part}が${staleParts[0].days}日空き。次回の優先候補です。`
+        : '頻度バランスは良好。次は記録更新を狙いましょう。',
+      `直近7日ボリュームは ${weeklyTotal.toLocaleString()}kg です。`,
     ]
 
-    return { frequency, weeklyTotal, monthlyTotal, yearlyTotal, allTotal, feedback }
+    return { weeklyTotal, monthlyTotal, yearlyTotal, allTotal, fallbackSummary }
   }, [daysSinceByBodyPart, sessions])
+
+  const growthRankings = useMemo(() => {
+    const now = dayjs().startOf('day')
+    const exerciseStats = new Map<
+      string,
+      {
+        currentMaxWeight: number
+        previousMaxWeight: number
+        currentVolume: number
+        previousVolume: number
+        lastPerformed: number
+      }
+    >()
+
+    sessions.forEach((session) => {
+      const sessionDay = dayjs(session.date).startOf('day')
+      const dayDiff = now.diff(sessionDay, 'day')
+      if (dayDiff < 0 || dayDiff >= analyticsWindowDays * 2) {
+        return
+      }
+
+      const bucket: 'current' | 'previous' = dayDiff < analyticsWindowDays ? 'current' : 'previous'
+      session.exercises.forEach((exercise) => {
+        const current = exerciseStats.get(exercise.name) ?? {
+          currentMaxWeight: 0,
+          previousMaxWeight: 0,
+          currentVolume: 0,
+          previousVolume: 0,
+          lastPerformed: 0,
+        }
+        const exerciseBestWeight = exercise.sets.reduce((max, set) => Math.max(max, set.weight), 0)
+        const exerciseVolume = exercise.sets.reduce((sum, set) => sum + set.weight * set.reps, 0)
+        if (bucket === 'current') {
+          current.currentMaxWeight = Math.max(current.currentMaxWeight, exerciseBestWeight)
+          current.currentVolume += exerciseVolume
+          current.lastPerformed = Math.max(current.lastPerformed, sessionDay.valueOf())
+        } else {
+          current.previousMaxWeight = Math.max(current.previousMaxWeight, exerciseBestWeight)
+          current.previousVolume += exerciseVolume
+        }
+        exerciseStats.set(exercise.name, current)
+      })
+    })
+
+    const toGrowth = (current: number, previous: number) => {
+      if (previous <= 0) {
+        if (current <= 0) {
+          return { label: '0%', sortScore: 0 }
+        }
+        return { label: 'NEW', sortScore: 10_000 + current }
+      }
+      const growth = ((current - previous) / previous) * 100
+      const rounded = Math.round(growth)
+      return { label: `${rounded >= 0 ? '+' : ''}${rounded}%`, sortScore: growth }
+    }
+
+    const ranking = Array.from(exerciseStats.entries())
+      .map(([name, stat]) => {
+        const weightGrowth = toGrowth(stat.currentMaxWeight, stat.previousMaxWeight)
+        const volumeGrowth = toGrowth(stat.currentVolume, stat.previousVolume)
+        return {
+          name,
+          currentMaxWeight: stat.currentMaxWeight,
+          previousMaxWeight: stat.previousMaxWeight,
+          currentVolume: stat.currentVolume,
+          previousVolume: stat.previousVolume,
+          weightGrowthLabel: weightGrowth.label,
+          volumeGrowthLabel: volumeGrowth.label,
+          weightSortScore: weightGrowth.sortScore,
+          volumeSortScore: volumeGrowth.sortScore,
+          lastPerformed: stat.lastPerformed,
+        }
+      })
+      .filter((item) => item.currentMaxWeight > 0 || item.currentVolume > 0)
+
+    const sortByScore = (left: { sortScore: number; lastPerformed: number }, right: { sortScore: number; lastPerformed: number }) => {
+      const diff = right.sortScore - left.sortScore
+      if (diff !== 0) {
+        return diff
+      }
+      return right.lastPerformed - left.lastPerformed
+    }
+
+    const weightRanking = [...ranking]
+      .sort((left, right) =>
+        sortByScore(
+          { sortScore: left.weightSortScore, lastPerformed: left.lastPerformed },
+          { sortScore: right.weightSortScore, lastPerformed: right.lastPerformed },
+        ),
+      )
+    const volumeRanking = [...ranking]
+      .sort((left, right) =>
+        sortByScore(
+          { sortScore: left.volumeSortScore, lastPerformed: left.lastPerformed },
+          { sortScore: right.volumeSortScore, lastPerformed: right.lastPerformed },
+        ),
+      )
+
+    return {
+      weightTop: weightRanking.slice(0, 3),
+      weightHiddenCount: Math.max(0, weightRanking.length - 3),
+      volumeTop: volumeRanking.slice(0, 3),
+      volumeHiddenCount: Math.max(0, volumeRanking.length - 3),
+    }
+  }, [analyticsWindowDays, sessions])
 
   async function handleAuth(email: string, password: string, mode: AuthMode) {
     if (!auth) {
@@ -2863,30 +2966,80 @@ function App() {
       )}
 
       {tab === 'analytics' && (
-        <section className="card">
-          <h2>分析</h2>
-          <h3>部位頻度</h3>
-          {analytics.frequency.map((item) => (
-            <div key={item.part} className="row">
-              <strong>{item.part}</strong>
-              <span className="badge">{'★'.repeat(Math.min(item.count, 5)) || '☆'}</span>
-            </div>
-          ))}
-          <h3>ボリューム</h3>
-          <p>週間: {analytics.weeklyTotal.toLocaleString()} kg</p>
-          <p>月間: {analytics.monthlyTotal.toLocaleString()} kg</p>
-          <p>年間: {analytics.yearlyTotal.toLocaleString()} kg</p>
-          <p>総重量: {analytics.allTotal.toLocaleString()} kg</p>
+        <section className="card analytics-screen-card">
           <div className="row">
-            <h3>AIフィードバック</h3>
+            <h2>分析</h2>
             <button type="button" onClick={() => void refreshAiFeedback()} disabled={aiLoading}>
               {aiLoading ? '更新中...' : 'AI分析を更新'}
             </button>
           </div>
           {aiError && <p className="error">{aiError}</p>}
-          {(aiFeedback.length > 0 ? aiFeedback : analytics.feedback).map((text) => (
-            <p key={text} className="feedback-line">・{text}</p>
-          ))}
+
+          <section className="analytics-ai-summary">
+            <h3>AI総合サマリー</h3>
+            {(aiFeedback.length > 0 ? aiFeedback : analytics.fallbackSummary).slice(0, 2).map((text) => (
+              <p key={text} className="feedback-line">・{text}</p>
+            ))}
+          </section>
+
+          <div className="chip-row analytics-period-row">
+            <button
+              type="button"
+              className={`chip-button ${analyticsWindowDays === 7 ? 'active' : ''}`}
+              onClick={() => {
+                triggerHaptic(10)
+                setAnalyticsWindowDays(7)
+              }}
+            >
+              7日比較
+            </button>
+            <button
+              type="button"
+              className={`chip-button ${analyticsWindowDays === 30 ? 'active' : ''}`}
+              onClick={() => {
+                triggerHaptic(10)
+                setAnalyticsWindowDays(30)
+              }}
+            >
+              30日比較
+            </button>
+          </div>
+
+          <section className="analytics-ranking-grid">
+            <article className="analytics-ranking-card">
+              <h3>重量伸び率ランキング</h3>
+              {growthRankings.weightTop.map((item, index) => (
+                <div key={`weight-${item.name}`} className="analytics-ranking-item">
+                  <strong>{index + 1}. {item.name}</strong>
+                  <span>{item.weightGrowthLabel}</span>
+                </div>
+              ))}
+              {growthRankings.weightHiddenCount > 0 && (
+                <p className="analytics-pro-teaser">+{growthRankings.weightHiddenCount}件は Pro で解放</p>
+              )}
+            </article>
+
+            <article className="analytics-ranking-card">
+              <h3>総ボリューム伸び率ランキング</h3>
+              {growthRankings.volumeTop.map((item, index) => (
+                <div key={`volume-${item.name}`} className="analytics-ranking-item">
+                  <strong>{index + 1}. {item.name}</strong>
+                  <span>{item.volumeGrowthLabel}</span>
+                </div>
+              ))}
+              {growthRankings.volumeHiddenCount > 0 && (
+                <p className="analytics-pro-teaser">+{growthRankings.volumeHiddenCount}件は Pro で解放</p>
+              )}
+            </article>
+          </section>
+
+          <section className="analytics-volume-overview">
+            <h3>ボリューム</h3>
+            <p>週間: {analytics.weeklyTotal.toLocaleString()} kg</p>
+            <p>月間: {analytics.monthlyTotal.toLocaleString()} kg</p>
+            <p>年間: {analytics.yearlyTotal.toLocaleString()} kg</p>
+            <p>総重量: {analytics.allTotal.toLocaleString()} kg</p>
+          </section>
         </section>
       )}
 
