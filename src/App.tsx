@@ -17,16 +17,17 @@ import { auth, db, isFirebaseConfigured } from './lib/firebase'
 import { BODY_PARTS, EXERCISES_BY_BODY_PART } from './data/catalog'
 import { useAtlasStore } from './store/useAtlasStore'
 import { removeSession, saveSession, subscribeSessions } from './lib/firestoreSync'
-import type { BodyPart, ExerciseSet, WorkoutSession } from './types'
+import type { BodyPart, ExerciseMetricType, ExerciseSet, WorkoutSession } from './types'
 
 type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'settings'
 type MainTab = Exclude<AppTab, 'settings'>
 type AuthMode = 'login' | 'signup' | 'reset'
 type WorkoutPhase = 'body' | 'exercise' | 'record'
-type PickerTargetKey = 'weight' | 'reps'
+type PickerTargetKey = 'weight' | 'reps' | 'duration'
 type BodyPartBadgeTone = 'new' | 'fresh' | 'ready' | 'stale'
 type ExercisePreference = {
   restSeconds: number
+  metricType?: ExerciseMetricType
 }
 type ExerciseGuidanceSpec = {
   setup: string
@@ -38,6 +39,7 @@ type ExerciseGuidanceSpec = {
 type ExerciseInputProfile = {
   defaultWeight: number
   defaultReps: number
+  defaultDurationSec: number
   defaultRestSeconds: number
   weightMin: number
   weightMax: number
@@ -45,6 +47,9 @@ type ExerciseInputProfile = {
   repMin: number
   repMax: number
   repStep: number
+  durationMin: number
+  durationMax: number
+  durationStep: number
 }
 const WHEEL_ITEM_HEIGHT = 54
 const WHEEL_VISIBLE_ROWS = 5
@@ -56,11 +61,51 @@ const PRO_UNLOCKED_STORAGE_KEY = 'atlas.pro-unlocked.v1'
 const PRESET_EXERCISE_NAMES = new Set(
   BODY_PARTS.flatMap((bodyPart) => EXERCISES_BY_BODY_PART[bodyPart]),
 )
+const TIME_BASED_EXERCISES = new Set(['プランク', 'サイドプランク'])
 
 function triggerHaptic(pattern: number | number[]) {
   if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
     navigator.vibrate(pattern)
   }
+}
+
+function getDefaultExerciseMetricType(exerciseName: string): ExerciseMetricType {
+  return TIME_BASED_EXERCISES.has(exerciseName) ? 'time' : 'reps'
+}
+
+function getSetMetricValue(set: Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>, metricType: ExerciseMetricType): number {
+  if (metricType === 'time') {
+    return set.durationSec ?? set.reps
+  }
+  return set.reps
+}
+
+function getExerciseSetVolume(set: Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>, metricType: ExerciseMetricType): number {
+  const metricValue = getSetMetricValue(set, metricType)
+  if (metricType === 'time') {
+    return set.weight > 0 ? set.weight * metricValue : metricValue
+  }
+  return set.weight * metricValue
+}
+
+function resolveExerciseMetricType(exercise: { name: string; metricType?: ExerciseMetricType }): ExerciseMetricType {
+  return exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
+}
+
+function getWorkoutSessionVolume(session: WorkoutSession): number {
+  return session.exercises.reduce((exerciseSum, exercise) => {
+    const metricType = resolveExerciseMetricType(exercise)
+    return exerciseSum + exercise.sets.reduce((setSum, set) => setSum + getExerciseSetVolume(set, metricType), 0)
+  }, 0)
+}
+
+function formatSetLabel(set: Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>, metricType: ExerciseMetricType): string {
+  const metricValue = getSetMetricValue(set, metricType)
+  const metricUnit = metricType === 'time' ? '秒' : '回'
+  if (set.weight > 0) {
+    return `${set.weight}kg×${metricValue}${metricUnit}`
+  }
+  return `${metricValue}${metricUnit}`
 }
 
 const EXERCISE_INFO: Record<string, string> = {
@@ -500,11 +545,12 @@ function createSet(index: number): ExerciseSet {
   }
 }
 
-function cloneSetDrafts(sets: Array<Pick<ExerciseSet, 'weight' | 'reps'>>): ExerciseSet[] {
+function cloneSetDrafts(sets: Array<Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>>): ExerciseSet[] {
   return sets.map((set, index) => ({
     id: `${Date.now()}-${index}`,
     weight: set.weight,
     reps: set.reps,
+    durationSec: set.durationSec,
   }))
 }
 
@@ -548,6 +594,7 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
     return {
       defaultWeight: 60,
       defaultReps: 8,
+      defaultDurationSec: 60,
       defaultRestSeconds: 150,
       weightMin: 0,
       weightMax: 300,
@@ -555,6 +602,9 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
       repMin: 1,
       repMax: 15,
       repStep: 1,
+      durationMin: 15,
+      durationMax: 240,
+      durationStep: 5,
     }
   }
 
@@ -576,6 +626,7 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
     return {
       defaultWeight: 40,
       defaultReps: 10,
+      defaultDurationSec: 60,
       defaultRestSeconds: 105,
       weightMin: 0,
       weightMax: 240,
@@ -583,6 +634,9 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
       repMin: 4,
       repMax: 20,
       repStep: 1,
+      durationMin: 15,
+      durationMax: 240,
+      durationStep: 5,
     }
   }
 
@@ -617,6 +671,7 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
     return {
       defaultWeight: 10,
       defaultReps: 12,
+      defaultDurationSec: 45,
       defaultRestSeconds: 75,
       weightMin: 0,
       weightMax: 80,
@@ -624,6 +679,9 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
       repMin: 6,
       repMax: 25,
       repStep: 1,
+      durationMin: 10,
+      durationMax: 180,
+      durationStep: 5,
     }
   }
 
@@ -647,6 +705,7 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
     return {
       defaultWeight: 0,
       defaultReps: ['プランク', 'サイドプランク'].includes(exerciseName) ? 1 : 12,
+      defaultDurationSec: ['プランク', 'サイドプランク'].includes(exerciseName) ? 45 : 60,
       defaultRestSeconds: 60,
       weightMin: 0,
       weightMax: 40,
@@ -654,12 +713,16 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
       repMin: 1,
       repMax: 30,
       repStep: 1,
+      durationMin: 10,
+      durationMax: 300,
+      durationStep: 5,
     }
   }
 
   return {
     defaultWeight: 20,
     defaultReps: 10,
+    defaultDurationSec: 60,
     defaultRestSeconds: 90,
     weightMin: 0,
     weightMax: 120,
@@ -667,22 +730,30 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
     repMin: 4,
     repMax: 20,
     repStep: 1,
+    durationMin: 15,
+    durationMax: 240,
+    durationStep: 5,
   }
 }
 
 function getPickerOptionsForExercise(exerciseName: string, key: PickerTargetKey): number[] {
   const profile = getExerciseInputProfile(exerciseName)
-  return key === 'weight'
-    ? buildNumberOptions(profile.weightMin, profile.weightMax, profile.weightStep)
-    : buildNumberOptions(profile.repMin, profile.repMax, profile.repStep)
+  if (key === 'weight') {
+    return buildNumberOptions(profile.weightMin, profile.weightMax, profile.weightStep)
+  }
+  if (key === 'duration') {
+    return buildNumberOptions(profile.durationMin, profile.durationMax, profile.durationStep)
+  }
+  return buildNumberOptions(profile.repMin, profile.repMax, profile.repStep)
 }
 
-function createDefaultSetsForExercise(exerciseName: string): ExerciseSet[] {
+function createDefaultSetsForExercise(exerciseName: string, metricType: ExerciseMetricType = getDefaultExerciseMetricType(exerciseName)): ExerciseSet[] {
   const profile = getExerciseInputProfile(exerciseName)
   return Array.from({ length: 3 }, (_, index) => ({
     id: `${Date.now()}-${index}`,
     weight: profile.defaultWeight,
-    reps: profile.defaultReps,
+    reps: metricType === 'time' ? profile.defaultDurationSec : profile.defaultReps,
+    durationSec: metricType === 'time' ? profile.defaultDurationSec : undefined,
   }))
 }
 
@@ -767,7 +838,12 @@ function loadCustomExercisesByBodyPart(): Record<BodyPart, string[]> {
   }
 }
 
-function createSession(bodyPart: BodyPart, exerciseName: string, sets: ExerciseSet[]): WorkoutSession {
+function createSession(
+  bodyPart: BodyPart,
+  exerciseName: string,
+  metricType: ExerciseMetricType,
+  sets: ExerciseSet[],
+): WorkoutSession {
   return {
     id: crypto.randomUUID(),
     date: dayjs().toISOString(),
@@ -776,7 +852,8 @@ function createSession(bodyPart: BodyPart, exerciseName: string, sets: ExerciseS
       {
         id: crypto.randomUUID(),
         name: exerciseName,
-        sets,
+        metricType,
+        sets: sets.map((set) => ({ ...set })),
       },
     ],
   }
@@ -1003,7 +1080,7 @@ function App() {
     return window.localStorage.getItem(PRO_UNLOCKED_STORAGE_KEY) === '1'
   })
   const [exerciseInfoTarget, setExerciseInfoTarget] = useState<string | null>(null)
-  const [pickerTarget, setPickerTarget] = useState<{ setId: string; key: 'weight' | 'reps' } | null>(null)
+  const [pickerTarget, setPickerTarget] = useState<{ setId: string; key: PickerTargetKey } | null>(null)
   const [pickerValue, setPickerValue] = useState(0)
   const [isSavingWorkout, setIsSavingWorkout] = useState(false)
   const [toastState, setToastState] = useState<{ message: string; tone: 'default' | 'error' } | null>(null)
@@ -1012,7 +1089,7 @@ function App() {
   const [restTimerOffset, setRestTimerOffset] = useState({ x: 0, y: 0 })
   const [isLandscapeBlocked, setIsLandscapeBlocked] = useState(false)
   const [exerciseSetDrafts, setExerciseSetDrafts] = useState<
-    Record<string, Array<Pick<ExerciseSet, 'weight' | 'reps'>>>
+    Record<string, Array<Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>>>
   >({})
   const [exercisePreferences, setExercisePreferences] = useState<Record<string, ExercisePreference>>(
     loadExercisePreferences,
@@ -1153,6 +1230,7 @@ function App() {
       [getExerciseDraftKey(selectedBodyPart, selectedExercise)]: sets.map((set) => ({
         weight: set.weight,
         reps: set.reps,
+        durationSec: set.durationSec,
       })),
     }))
   }, [selectedBodyPart, selectedExercise, sets, workoutPhase])
@@ -1340,9 +1418,7 @@ function App() {
     groupedHistory.forEach((session) => {
       const dateKey = dayjs(session.date).format('YYYY-MM-DD')
       const existing = sections.get(dateKey)
-      const sessionVolume = session.exercises
-        .flatMap((exercise) => exercise.sets)
-        .reduce((sum, set) => sum + set.weight * set.reps, 0)
+      const sessionVolume = getWorkoutSessionVolume(session)
       if (!existing) {
         sections.set(dateKey, {
           date: dateKey,
@@ -1421,9 +1497,7 @@ function App() {
       }
 
       const bucketIndex = sessionDay.day()
-      const sessionVolume = session.exercises
-        .flatMap((exercise) => exercise.sets)
-        .reduce((sum, set) => sum + set.weight * set.reps, 0)
+      const sessionVolume = getWorkoutSessionVolume(session)
       buckets[bucketIndex] += sessionVolume
     })
 
@@ -1444,9 +1518,7 @@ function App() {
         const diff = now.diff(dayjs(session.date), 'day')
         return diff >= 7 && diff < 14
       })
-      .flatMap((session) => session.exercises)
-      .flatMap((exercise) => exercise.sets)
-      .reduce((sum, set) => sum + set.weight * set.reps, 0)
+      .reduce((sum, session) => sum + getWorkoutSessionVolume(session), 0)
   }, [sessions])
 
   const weeklyDeltaLabel = useMemo(() => {
@@ -1523,7 +1595,20 @@ function App() {
       const value = daySessions.reduce((sum, session) => {
         const exerciseCount = session.exercises.length
         const setCount = session.exercises.reduce((acc, exercise) => acc + exercise.sets.length, 0)
-        const repCount = session.exercises.flatMap((exercise) => exercise.sets).reduce((acc, set) => acc + set.reps, 0)
+        const repCount = session.exercises.reduce((exerciseSum, exercise) => {
+          const metricType = resolveExerciseMetricType(exercise)
+          return (
+            exerciseSum
+            + exercise.sets.reduce(
+              (setSum, set) =>
+                setSum
+                + (metricType === 'time'
+                  ? Math.max(1, Math.round(getSetMetricValue(set, metricType) / 5))
+                  : getSetMetricValue(set, metricType)),
+              0,
+            )
+          )
+        }, 0)
         const estimatedMinutes = exerciseCount * 3 + setCount * 2.4 + repCount * 0.08 + 4
         const met = strengthMetByBodyPart[session.bodyPart]
         const sessionCalories = Math.max(
@@ -1582,23 +1667,22 @@ function App() {
 
     const latest = [...sessions].sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())[0]
     const totalSets = latest.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0)
-    const totalVolume = latest.exercises
-      .flatMap((exercise) => exercise.sets)
-      .reduce((sum, set) => sum + set.weight * set.reps, 0)
+    const totalVolume = getWorkoutSessionVolume(latest)
     const restDays = dayjs().diff(dayjs(latest.date), 'day')
     const highlights = latest.exercises.slice(0, 2).map((exercise) => {
+      const metricType = resolveExerciseMetricType(exercise)
       const bestSet = exercise.sets.reduce((best, current) => {
         if (current.weight > best.weight) {
           return current
         }
-        if (current.weight === best.weight && current.reps > best.reps) {
+        if (current.weight === best.weight && getSetMetricValue(current, metricType) > getSetMetricValue(best, metricType)) {
           return current
         }
         return best
       }, exercise.sets[0])
       return {
         name: exercise.name,
-        bestSetLabel: `${bestSet.weight}×${bestSet.reps}`,
+        bestSetLabel: formatSetLabel(bestSet, metricType),
         setCount: exercise.sets.length,
       }
     })
@@ -1616,7 +1700,7 @@ function App() {
   }, [sessions])
 
   const latestExerciseSetHistory = useMemo(() => {
-    const history = new Map<string, Array<Pick<ExerciseSet, 'weight' | 'reps'>>>()
+    const history = new Map<string, Array<Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>>>()
     const sortedSessions = [...sessions].sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())
 
     sortedSessions.forEach((session) => {
@@ -1628,6 +1712,7 @@ function App() {
             exercise.sets.map((set) => ({
               weight: set.weight,
               reps: set.reps,
+              durationSec: set.durationSec,
             })),
           )
         }
@@ -1653,18 +1738,22 @@ function App() {
   }, [homeLastWorkoutVisibleHighlights.length, latestSessionSummary])
 
   const exerciseUsageStats = useMemo(() => {
-    const stats = new Map<string, { count: number; lastPerformed: number; bestWeight: number; bestReps: number }>()
+    const stats = new Map<
+      string,
+      { count: number; lastPerformed: number; metricType: ExerciseMetricType; bestWeight: number; bestMetric: number }
+    >()
 
     sessions
       .filter((session) => session.bodyPart === selectedBodyPart)
       .forEach((session) => {
         const performedAt = dayjs(session.date).valueOf()
         session.exercises.forEach((exercise) => {
+          const metricType = exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
           const sessionBestSet = exercise.sets.reduce((best, set) => {
             if (set.weight > best.weight) {
               return set
             }
-            if (set.weight === best.weight && set.reps > best.reps) {
+            if (set.weight === best.weight && getSetMetricValue(set, metricType) > getSetMetricValue(best, metricType)) {
               return set
             }
             return best
@@ -1674,21 +1763,24 @@ function App() {
             stats.set(exercise.name, {
               count: 1,
               lastPerformed: performedAt,
+              metricType,
               bestWeight: sessionBestSet.weight,
-              bestReps: sessionBestSet.reps,
+              bestMetric: getSetMetricValue(sessionBestSet, metricType),
             })
             return
           }
 
           const hasNewBest =
             sessionBestSet.weight > current.bestWeight ||
-            (sessionBestSet.weight === current.bestWeight && sessionBestSet.reps > current.bestReps)
+            (sessionBestSet.weight === current.bestWeight
+              && getSetMetricValue(sessionBestSet, metricType) > current.bestMetric)
 
           stats.set(exercise.name, {
             count: current.count + 1,
             lastPerformed: Math.max(current.lastPerformed, performedAt),
+            metricType,
             bestWeight: hasNewBest ? sessionBestSet.weight : current.bestWeight,
-            bestReps: hasNewBest ? sessionBestSet.reps : current.bestReps,
+            bestMetric: hasNewBest ? getSetMetricValue(sessionBestSet, metricType) : current.bestMetric,
           })
         })
       })
@@ -1773,17 +1865,22 @@ function App() {
     return readinessMap
   }, [daysSinceByBodyPart])
 
+  const selectedExerciseMetricType = useMemo(() => {
+    const draftKey = getExerciseDraftKey(selectedBodyPart, selectedExercise)
+    return exercisePreferences[draftKey]?.metricType ?? getDefaultExerciseMetricType(selectedExercise)
+  }, [exercisePreferences, selectedBodyPart, selectedExercise])
+
   const hasWorkoutDraft = useMemo(() => {
     return (
       workoutPhase !== 'body' ||
       sets.length !== 3 ||
       sets.some((set, index) => {
-        const defaults = createDefaultSetsForExercise(selectedExercise)
+        const defaults = createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType)
         const fallback = defaults[index]
         return !fallback || set.weight !== fallback.weight || set.reps !== fallback.reps
       })
     )
-  }, [selectedExercise, sets, workoutPhase])
+  }, [selectedExercise, selectedExerciseMetricType, sets, workoutPhase])
 
   const restTimerLabel = `${String(Math.floor(restSeconds / 60)).padStart(2, '0')}:${String(restSeconds % 60).padStart(2, '0')}`
   const shouldShowRestTimerFloating = tab !== 'settings' && (workoutPhase === 'record' || timerRunning)
@@ -1859,32 +1956,28 @@ function App() {
 
   const analytics = useMemo(() => {
     const now = dayjs()
+    const sumSessionVolume = (session: WorkoutSession) =>
+      session.exercises.reduce((exerciseSum, exercise) => {
+        const metricType = exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
+        return exerciseSum + exercise.sets.reduce((setSum, set) => setSum + getExerciseSetVolume(set, metricType), 0)
+      }, 0)
     const weeklyTotal = sessions
       .filter((session) => now.diff(dayjs(session.date), 'day') < 7)
-      .flatMap((session) => session.exercises)
-      .flatMap((exercise) => exercise.sets)
-      .reduce((sum, set) => sum + set.weight * set.reps, 0)
+      .reduce((sum, session) => sum + sumSessionVolume(session), 0)
     const monthlyTotal = sessions
       .filter((session) => now.diff(dayjs(session.date), 'day') < 31)
-      .flatMap((session) => session.exercises)
-      .flatMap((exercise) => exercise.sets)
-      .reduce((sum, set) => sum + set.weight * set.reps, 0)
+      .reduce((sum, session) => sum + sumSessionVolume(session), 0)
     const yearlyTotal = sessions
       .filter((session) => now.diff(dayjs(session.date), 'day') < 366)
-      .flatMap((session) => session.exercises)
-      .flatMap((exercise) => exercise.sets)
-      .reduce((sum, set) => sum + set.weight * set.reps, 0)
-    const allTotal = sessions
-      .flatMap((session) => session.exercises)
-      .flatMap((exercise) => exercise.sets)
-      .reduce((sum, set) => sum + set.weight * set.reps, 0)
+      .reduce((sum, session) => sum + sumSessionVolume(session), 0)
+    const allTotal = sessions.reduce((sum, session) => sum + sumSessionVolume(session), 0)
 
     const staleParts = daysSinceByBodyPart.filter((item) => item.days >= 7 && item.days < 999).slice(0, 2)
     const fallbackSummary = [
       staleParts.length > 0
         ? `${staleParts[0].part}が${staleParts[0].days}日空き。次回の優先候補です。`
         : '頻度バランスは良好。次は記録更新を狙いましょう。',
-      `直近7日ボリュームは ${weeklyTotal.toLocaleString()}kg です。`,
+      `直近7日ボリュームは ${weeklyTotal.toLocaleString()}pt です。`,
     ]
 
     return { weeklyTotal, monthlyTotal, yearlyTotal, allTotal, fallbackSummary }
@@ -1895,8 +1988,9 @@ function App() {
     const exerciseStats = new Map<
       string,
       {
-        currentMaxWeight: number
-        previousMaxWeight: number
+        metricType: ExerciseMetricType
+        currentPeakMetric: number
+        previousPeakMetric: number
         currentVolume: number
         previousVolume: number
         lastPerformed: number
@@ -1912,21 +2006,23 @@ function App() {
 
       const bucket: 'current' | 'previous' = dayDiff < analyticsWindowDays ? 'current' : 'previous'
       session.exercises.forEach((exercise) => {
+        const metricType = exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
         const current = exerciseStats.get(exercise.name) ?? {
-          currentMaxWeight: 0,
-          previousMaxWeight: 0,
+          metricType,
+          currentPeakMetric: 0,
+          previousPeakMetric: 0,
           currentVolume: 0,
           previousVolume: 0,
           lastPerformed: 0,
         }
-        const exerciseBestWeight = exercise.sets.reduce((max, set) => Math.max(max, set.weight), 0)
-        const exerciseVolume = exercise.sets.reduce((sum, set) => sum + set.weight * set.reps, 0)
+        const exercisePeak = exercise.sets.reduce((max, set) => Math.max(max, getSetMetricValue(set, metricType)), 0)
+        const exerciseVolume = exercise.sets.reduce((sum, set) => sum + getExerciseSetVolume(set, metricType), 0)
         if (bucket === 'current') {
-          current.currentMaxWeight = Math.max(current.currentMaxWeight, exerciseBestWeight)
+          current.currentPeakMetric = Math.max(current.currentPeakMetric, exercisePeak)
           current.currentVolume += exerciseVolume
           current.lastPerformed = Math.max(current.lastPerformed, sessionDay.valueOf())
         } else {
-          current.previousMaxWeight = Math.max(current.previousMaxWeight, exerciseBestWeight)
+          current.previousPeakMetric = Math.max(current.previousPeakMetric, exercisePeak)
           current.previousVolume += exerciseVolume
         }
         exerciseStats.set(exercise.name, current)
@@ -1947,12 +2043,13 @@ function App() {
 
     const ranking = Array.from(exerciseStats.entries())
       .map(([name, stat]) => {
-        const weightGrowth = toGrowth(stat.currentMaxWeight, stat.previousMaxWeight)
+        const weightGrowth = toGrowth(stat.currentPeakMetric, stat.previousPeakMetric)
         const volumeGrowth = toGrowth(stat.currentVolume, stat.previousVolume)
         return {
           name,
-          currentMaxWeight: stat.currentMaxWeight,
-          previousMaxWeight: stat.previousMaxWeight,
+          metricType: stat.metricType,
+          currentPeakMetric: stat.currentPeakMetric,
+          previousPeakMetric: stat.previousPeakMetric,
           currentVolume: stat.currentVolume,
           previousVolume: stat.previousVolume,
           weightGrowthLabel: weightGrowth.label,
@@ -1962,7 +2059,7 @@ function App() {
           lastPerformed: stat.lastPerformed,
         }
       })
-      .filter((item) => item.currentMaxWeight > 0 || item.currentVolume > 0)
+      .filter((item) => item.currentPeakMetric > 0 || item.currentVolume > 0)
 
     const sortByScore = (left: { sortScore: number; lastPerformed: number }, right: { sortScore: number; lastPerformed: number }) => {
       const diff = right.sortScore - left.sortScore
@@ -2002,9 +2099,15 @@ function App() {
         const diff = now.diff(dayjs(session.date), 'day')
         return diff >= analyticsWindowDays && diff < analyticsWindowDays * 2
       })
-      .flatMap((session) => session.exercises)
-      .flatMap((exercise) => exercise.sets)
-      .reduce((sum, set) => sum + set.weight * set.reps, 0)
+      .reduce(
+        (sum, session) =>
+          sum +
+          session.exercises.reduce((exerciseSum, exercise) => {
+            const metricType = exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
+            return exerciseSum + exercise.sets.reduce((setSum, set) => setSum + getExerciseSetVolume(set, metricType), 0)
+          }, 0),
+        0,
+      )
   }, [analyticsWindowDays, sessions])
 
   const analyticsLocalSummary = useMemo(() => {
@@ -2021,10 +2124,10 @@ function App() {
     const windowLabel = analyticsWindowDays === 7 ? '直近7日' : '直近30日'
 
     return [
-      `${windowLabel}の総ボリュームは ${currentWindowVolume.toLocaleString()}kg（前期間比 ${volumeDeltaLabel}）。`,
+      `${windowLabel}の総ボリュームは ${currentWindowVolume.toLocaleString()}pt（前期間比 ${volumeDeltaLabel}）。`,
       weightLeader
-        ? `重量伸び率トップは ${weightLeader.name}（${weightLeader.weightGrowthLabel}）。最高重量は ${weightLeader.previousMaxWeight}kg → ${weightLeader.currentMaxWeight}kg。`
-        : '重量伸び率の比較対象データがまだ不足しています。',
+        ? `指標伸び率トップは ${weightLeader.name}（${weightLeader.weightGrowthLabel}）。${weightLeader.metricType === 'time' ? '保持時間' : '回数'}は ${weightLeader.previousPeakMetric} → ${weightLeader.currentPeakMetric}。`
+        : '指標伸び率の比較対象データがまだ不足しています。',
       volumeLeader
         ? `総ボリューム伸び率トップは ${volumeLeader.name}（${volumeLeader.volumeGrowthLabel}）。`
         : '総ボリューム伸び率の比較対象データがまだ不足しています。',
@@ -2191,13 +2294,13 @@ function App() {
           volumeTrendPercent === null
             ? '初回基準を作成中'
             : `${volumeTrendPercent >= 0 ? '+' : ''}${volumeTrendPercent}%`,
-        detail: `総ボリューム ${currentWindowVolume.toLocaleString()}kg`,
+        detail: `総ボリューム ${currentWindowVolume.toLocaleString()}pt`,
       },
       {
         icon: '🎯',
         label: '主軸',
         title: topPart ? `${topPart.part} (${topPart.count}回)` : '判定中',
-        detail: topWeight ? `重量伸びトップ: ${topWeight.name} ${topWeight.weightGrowthLabel}` : '伸び率データを蓄積中',
+        detail: topWeight ? `指標伸びトップ: ${topWeight.name} ${topWeight.weightGrowthLabel}` : '伸び率データを蓄積中',
       },
     ]
   }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsNarrativeSummary, analyticsWindowDays, bodyPartWindowCounts, growthRankings.weightTop, previousWindowVolume])
@@ -2290,14 +2393,25 @@ function App() {
 
   function addSet() {
     const profile = getExerciseInputProfile(selectedExercise)
+    const metricType = selectedExerciseMetricType
     resetCompleteConfirm()
     setSets((previous) => [
       ...previous,
-      {
-        id: `${Date.now()}-${previous.length}`,
-        weight: previous[previous.length - 1]?.weight ?? profile.defaultWeight,
-        reps: previous[previous.length - 1]?.reps ?? profile.defaultReps,
-      },
+      (() => {
+        const previousSet = previous[previous.length - 1]
+        return {
+          id: `${Date.now()}-${previous.length}`,
+          weight: previousSet?.weight ?? profile.defaultWeight,
+          reps:
+            metricType === 'time'
+              ? previousSet?.durationSec ?? previousSet?.reps ?? profile.defaultDurationSec
+              : previousSet?.reps ?? profile.defaultReps,
+          durationSec:
+            metricType === 'time'
+              ? previousSet?.durationSec ?? previousSet?.reps ?? profile.defaultDurationSec
+              : undefined,
+        }
+      })(),
     ])
   }
 
@@ -2308,7 +2422,22 @@ function App() {
 
   function updateSet(setId: string, key: PickerTargetKey, value: number) {
     resetCompleteConfirm()
-    setSets((previous) => previous.map((set) => (set.id === setId ? { ...set, [key]: value } : set)))
+    setSets((previous) =>
+      previous.map((set) => {
+        if (set.id !== setId) {
+          return set
+        }
+        if (key === 'duration') {
+          return { ...set, reps: value, durationSec: value }
+        }
+        return { ...set, [key]: value }
+      }),
+    )
+  }
+
+  function getExerciseMetricType(bodyPart: BodyPart, exerciseName: string): ExerciseMetricType {
+    const draftKey = getExerciseDraftKey(bodyPart, exerciseName)
+    return exercisePreferences[draftKey]?.metricType ?? getDefaultExerciseMetricType(exerciseName)
   }
 
   function getExercisePreferredRestSeconds(bodyPart: BodyPart, exerciseName: string): number {
@@ -2316,11 +2445,39 @@ function App() {
     return exercisePreferences[draftKey]?.restSeconds ?? getExerciseInputProfile(exerciseName).defaultRestSeconds
   }
 
+  function setExerciseMetricType(bodyPart: BodyPart, exerciseName: string, metricType: ExerciseMetricType) {
+    const draftKey = getExerciseDraftKey(bodyPart, exerciseName)
+    const profile = getExerciseInputProfile(exerciseName)
+    setExercisePreferences((previous) => ({
+      ...previous,
+      [draftKey]: {
+        restSeconds: previous[draftKey]?.restSeconds ?? profile.defaultRestSeconds,
+        metricType,
+      },
+    }))
+    setSets((previous) =>
+      previous.map((set) =>
+        metricType === 'time'
+          ? {
+              ...set,
+              reps: set.durationSec ?? Math.max(profile.durationMin, Math.round(set.reps * 5)),
+              durationSec: set.durationSec ?? Math.max(profile.durationMin, Math.round(set.reps * 5)),
+            }
+          : {
+              ...set,
+              reps: set.durationSec ? Math.max(profile.repMin, Math.round(set.durationSec / 5)) : set.reps,
+              durationSec: undefined,
+            },
+      ),
+    )
+  }
+
   function setExercisePreferredRestSeconds(bodyPart: BodyPart, exerciseName: string, rest: number) {
     const draftKey = getExerciseDraftKey(bodyPart, exerciseName)
     setExercisePreferences((previous) => ({
       ...previous,
       [draftKey]: {
+        metricType: previous[draftKey]?.metricType ?? getDefaultExerciseMetricType(exerciseName),
         restSeconds: rest,
       },
     }))
@@ -2329,11 +2486,16 @@ function App() {
   function getPreparedSetsForExercise(bodyPart: BodyPart, exerciseName: string): ExerciseSet[] {
     const draftKey = getExerciseDraftKey(bodyPart, exerciseName)
     const draftSets = exerciseSetDrafts[draftKey] ?? latestExerciseSetHistory.get(draftKey)
+    const metricType = getExerciseMetricType(bodyPart, exerciseName)
     if (draftSets && draftSets.length > 0) {
-      return cloneSetDrafts(draftSets)
+      const cloned = cloneSetDrafts(draftSets)
+      return cloned.map((set) => ({
+        ...set,
+        durationSec: metricType === 'time' ? set.durationSec ?? set.reps : undefined,
+      }))
     }
 
-    return createDefaultSetsForExercise(exerciseName)
+    return createDefaultSetsForExercise(exerciseName, metricType)
   }
 
   function handleExerciseSelect(exerciseName: string) {
@@ -2538,7 +2700,7 @@ function App() {
 
     vibrateAndSetTab('workout', 18)
     setWorkoutPhase('body')
-    setSets(createDefaultSetsForExercise(selectedExercise))
+    setSets(createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType))
     setExerciseSearchQuery('')
     setAuthError(null)
     resetCompleteConfirm()
@@ -2590,11 +2752,11 @@ function App() {
 
     setIsSavingWorkout(true)
     try {
-      const session = createSession(selectedBodyPart, selectedExercise, sets)
+      const session = createSession(selectedBodyPart, selectedExercise, selectedExerciseMetricType, sets)
       addSession(session)
       setTab('workout')
       setWorkoutPhase('body')
-      setSets(createDefaultSetsForExercise(selectedExercise))
+      setSets(createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType))
       setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
       setTimerRunning(false)
       setAuthError(null)
@@ -2758,8 +2920,8 @@ function App() {
                     <strong>{latestSessionSummary.totalSets}</strong>
                   </p>
                   <p>
-                    <span>総重量</span>
-                    <strong>{latestSessionSummary.totalVolume.toLocaleString()}kg</strong>
+                    <span>総負荷</span>
+                    <strong>{latestSessionSummary.totalVolume.toLocaleString()}pt</strong>
                   </p>
                 </div>
                 <div className="home-last-workout-lines">
@@ -2816,7 +2978,7 @@ function App() {
           )}
           <p className="workout-affordance-hint">
             {workoutPhase === 'record'
-              ? '重量・回数をタップして編集 → 保存して終了'
+              ? '重量・回数/秒をタップして編集 → 保存して終了'
               : 'カードをタップして次へ進みます'}
           </p>
 
@@ -2881,7 +3043,16 @@ function App() {
                       <span>{exercise}</span>
                       <small className="previous-record">
                         {exerciseUsageStats.get(exercise)
-                          ? `${exerciseUsageStats.get(exercise)?.bestWeight}kg×${exerciseUsageStats.get(exercise)?.bestReps}`
+                          ? (() => {
+                              const stat = exerciseUsageStats.get(exercise)
+                              if (!stat) {
+                                return '最高記録なし'
+                              }
+                              const unit = stat.metricType === 'time' ? '秒' : '回'
+                              return stat.bestWeight > 0
+                                ? `${stat.bestWeight}kg×${stat.bestMetric}${unit}`
+                                : `${stat.bestMetric}${unit}`
+                            })()
                           : '最高記録なし'}
                       </small>
                     </button>
@@ -2905,12 +3076,34 @@ function App() {
           {workoutPhase === 'record' && (
             <div className="step-panel record-step">
               <div className="record-step-body">
+                <div className="chip-row">
+                  <button
+                    type="button"
+                    className={`chip-button ${selectedExerciseMetricType === 'reps' ? 'active' : ''}`}
+                    onClick={() => {
+                      triggerHaptic(10)
+                      setExerciseMetricType(selectedBodyPart, selectedExercise, 'reps')
+                    }}
+                  >
+                    回数
+                  </button>
+                  <button
+                    type="button"
+                    className={`chip-button ${selectedExerciseMetricType === 'time' ? 'active' : ''}`}
+                    onClick={() => {
+                      triggerHaptic(10)
+                      setExerciseMetricType(selectedBodyPart, selectedExercise, 'time')
+                    }}
+                  >
+                    秒
+                  </button>
+                </div>
                 <div className="previous-set-card">
                   <p className="previous-set-line">
                     前回セット:
                     {' '}
                     {previousExerciseSets.length > 0
-                      ? previousExerciseSets.map((set) => `${set.weight}kg×${set.reps}`).join(' / ')
+                      ? previousExerciseSets.map((set) => formatSetLabel(set, selectedExerciseMetricType)).join(' / ')
                       : '記録なし'}
                   </p>
                   <span className="previous-set-status">
@@ -2934,10 +3127,16 @@ function App() {
                         type="button"
                         onClick={() => {
                           triggerHaptic(10)
-                          openWheelPicker(set.id, 'reps', set.reps)
+                          openWheelPicker(
+                            set.id,
+                            selectedExerciseMetricType === 'time' ? 'duration' : 'reps',
+                            getSetMetricValue(set, selectedExerciseMetricType),
+                          )
                         }}
                       >
-                        {set.reps}回
+                        {selectedExerciseMetricType === 'time'
+                          ? `${getSetMetricValue(set, selectedExerciseMetricType)}秒`
+                          : `${set.reps}回`}
                       </button>
                       <button
                         type="button"
@@ -3218,7 +3417,7 @@ function App() {
                 >
                   <div>
                     <strong>{dayjs(section.date).format('YYYY/MM/DD')}</strong>
-                    <small>{section.sessionCount}件 / 総重量 {section.totalVolume.toLocaleString()}kg</small>
+                    <small>{section.sessionCount}件 / 総負荷 {section.totalVolume.toLocaleString()}pt</small>
                   </div>
                   <div className="history-date-toggle-state">
                     <small className={`history-open-badge ${isOpen ? 'open' : ''}`}>{isOpen ? '表示中' : '未表示'}</small>
@@ -3250,7 +3449,9 @@ function App() {
                       {session.exercises.map((exercise) => (
                         <p key={exercise.id}>
                           {exercise.name}:{' '}
-                          {exercise.sets.map((set) => `${set.weight}×${set.reps}`).join(' / ')}
+                          {exercise.sets
+                            .map((set) => formatSetLabel(set, exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)))
+                            .join(' / ')}
                         </p>
                       ))}
                     </article>
@@ -3319,12 +3520,12 @@ function App() {
 
           <section className="analytics-ranking-grid">
             <article className="analytics-ranking-card">
-              <h3>重量伸び率ランキング</h3>
+              <h3>指標伸び率ランキング</h3>
               {growthRankings.weightTop.slice(0, visibleRankingCount).map((item, index) => (
                 <div key={`weight-${item.name}`} className="analytics-ranking-item">
                   <div className="analytics-ranking-main">
                     <strong>{index + 1}. {item.name}</strong>
-                    <small>{item.previousMaxWeight}kg → {item.currentMaxWeight}kg</small>
+                    <small>{item.previousPeakMetric}{item.metricType === 'time' ? '秒' : '回'} → {item.currentPeakMetric}{item.metricType === 'time' ? '秒' : '回'}</small>
                   </div>
                   <span>{item.weightGrowthLabel}</span>
                 </div>
@@ -3341,7 +3542,7 @@ function App() {
                 <div key={`volume-${item.name}`} className="analytics-ranking-item">
                   <div className="analytics-ranking-main">
                     <strong>{index + 1}. {item.name}</strong>
-                    <small>{item.previousVolume.toLocaleString()}kg → {item.currentVolume.toLocaleString()}kg</small>
+                    <small>{item.previousVolume.toLocaleString()}pt → {item.currentVolume.toLocaleString()}pt</small>
                   </div>
                   <span>{item.volumeGrowthLabel}</span>
                 </div>
@@ -3494,11 +3695,13 @@ function App() {
       {pickerTarget && (
         <div className="overlay">
           <div className="overlay-card picker-overlay-card">
-            <h3>{pickerTarget.key === 'weight' ? '重量を選択' : '回数を選択'}</h3>
+            <h3>{pickerTarget.key === 'weight' ? '重量を選択' : pickerTarget.key === 'duration' ? '秒数を選択' : '回数を選択'}</h3>
             <p className="picker-meta">
               {pickerTarget.key === 'weight'
                 ? `${selectedExerciseProfile.weightStep}kg刻み / ${selectedExerciseProfile.weightMin}〜${selectedExerciseProfile.weightMax}kg`
-                : `${selectedExerciseProfile.repStep}回刻み / ${selectedExerciseProfile.repMin}〜${selectedExerciseProfile.repMax}回`}
+                : pickerTarget.key === 'duration'
+                  ? `${selectedExerciseProfile.durationStep}秒刻み / ${selectedExerciseProfile.durationMin}〜${selectedExerciseProfile.durationMax}秒`
+                  : `${selectedExerciseProfile.repStep}回刻み / ${selectedExerciseProfile.repMin}〜${selectedExerciseProfile.repMax}回`}
             </p>
             <div className="wheel-shell">
               <div className="wheel-window">
@@ -3547,7 +3750,7 @@ function App() {
                   ))}
                   <div style={{ height: `${WHEEL_SIDE_PADDING}px` }} />
                 </div>
-                <span className="wheel-unit">{pickerTarget.key === 'weight' ? 'kg' : '回'}</span>
+                <span className="wheel-unit">{pickerTarget.key === 'weight' ? 'kg' : pickerTarget.key === 'duration' ? '秒' : '回'}</span>
               </div>
             </div>
             <div className="action-row">
