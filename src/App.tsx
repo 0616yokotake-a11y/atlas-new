@@ -1109,6 +1109,7 @@ function App() {
     originY: number
     dragged: boolean
   } | null>(null)
+  const suppressRestTimerToggleRef = useRef(false)
   const previousStreakDaysRef = useRef<number | null>(null)
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
   const previousMainTabRef = useRef<MainTab>('home')
@@ -1977,7 +1978,7 @@ function App() {
       staleParts.length > 0
         ? `${staleParts[0].part}が${staleParts[0].days}日空き。次回の優先候補です。`
         : '頻度バランスは良好。次は記録更新を狙いましょう。',
-      `直近7日ボリュームは ${weeklyTotal.toLocaleString()}pt です。`,
+      `直近7日の総負荷は ${weeklyTotal.toLocaleString()}pt です。`,
     ]
 
     return { weeklyTotal, monthlyTotal, yearlyTotal, allTotal, fallbackSummary }
@@ -2124,13 +2125,13 @@ function App() {
     const windowLabel = analyticsWindowDays === 7 ? '直近7日' : '直近30日'
 
     return [
-      `${windowLabel}の総ボリュームは ${currentWindowVolume.toLocaleString()}pt（前期間比 ${volumeDeltaLabel}）。`,
+      `${windowLabel}の総負荷は ${currentWindowVolume.toLocaleString()}pt（前期間比 ${volumeDeltaLabel}）。`,
       weightLeader
         ? `指標伸び率トップは ${weightLeader.name}（${weightLeader.weightGrowthLabel}）。${weightLeader.metricType === 'time' ? '保持時間' : '回数'}は ${weightLeader.previousPeakMetric} → ${weightLeader.currentPeakMetric}。`
         : '指標伸び率の比較対象データがまだ不足しています。',
       volumeLeader
-        ? `総ボリューム伸び率トップは ${volumeLeader.name}（${volumeLeader.volumeGrowthLabel}）。`
-        : '総ボリューム伸び率の比較対象データがまだ不足しています。',
+        ? `総負荷伸び率トップは ${volumeLeader.name}（${volumeLeader.volumeGrowthLabel}）。`
+        : '総負荷伸び率の比較対象データがまだ不足しています。',
       staleParts.length > 0
         ? `${staleParts.map((item) => `${item.part}${item.days}日空き`).join(' / ')}。次回は優先的に実施推奨。`
         : '部位の休養バランスは良好です。負荷更新フェーズに入れます。',
@@ -2154,7 +2155,7 @@ function App() {
     }
     const positive = top.filter((item) => item.volumeGrowthLabel === 'NEW' || item.volumeGrowthLabel.startsWith('+')).length
     const lead = top[0]
-    return `AI評価: 上位${top.length}件中${positive}件が伸長。${lead.name}はボリューム管理が良好です。疲労感が強い日はセット数を微調整しましょう。`
+    return `AI評価: 上位${top.length}件中${positive}件が伸長。${lead.name}は総負荷管理が良好です。疲労感が強い日はセット数や秒数を微調整しましょう。`
   }, [growthRankings.volumeTop])
 
   const recoveryAlerts = useMemo(() => {
@@ -2188,7 +2189,7 @@ function App() {
         alerts.push({
           severity: increaseRate >= 40 ? 'high' : 'warn',
           icon: increaseRate >= 40 ? '🔥' : '📈',
-          title: 'ボリューム急上昇',
+          title: '総負荷急上昇',
           detail: `前期間比 +${Math.round(increaseRate)}%。睡眠・栄養・休養を優先し、次回は追い込みすぎを回避。`,
         })
       }
@@ -2258,12 +2259,12 @@ function App() {
     const action2 =
       zeroParts.length > 0
         ? `未実施部位（${zeroParts.map((item) => item.part).join('・')}）を1回入れると、全体の伸びが安定します。`
-        : '全主要部位に刺激が入っています。次は苦手種目の回数更新を狙いましょう。'
+        : '全主要部位に刺激が入っています。次は苦手種目の指標更新（回数/秒）を狙いましょう。'
 
     return [
       `あなたの直近傾向は「${persona}」。`,
       topPart ? `主軸は${topPart.part}（${topPart.count}回）。この強みを軸に他部位へ波及させるフェーズです。` : '主軸部位の判定データが不足しています。',
-      volumeTrendPercent === null ? '前期間データがないため、今回の記録が新しい基準値になります。' : `総ボリュームは前期間比 ${volumeTrendPercent >= 0 ? '+' : ''}${volumeTrendPercent}%。`,
+      volumeTrendPercent === null ? '前期間データがないため、今回の記録が新しい基準値になります。' : `総負荷は前期間比 ${volumeTrendPercent >= 0 ? '+' : ''}${volumeTrendPercent}%。`,
       action1,
       action2,
     ]
@@ -2294,7 +2295,7 @@ function App() {
           volumeTrendPercent === null
             ? '初回基準を作成中'
             : `${volumeTrendPercent >= 0 ? '+' : ''}${volumeTrendPercent}%`,
-        detail: `総ボリューム ${currentWindowVolume.toLocaleString()}pt`,
+        detail: `総負荷 ${currentWindowVolume.toLocaleString()}pt`,
       },
       {
         icon: '🎯',
@@ -2641,7 +2642,6 @@ function App() {
 
   function handleRestTimerPointerDown(event: React.PointerEvent<HTMLButtonElement>) {
     event.currentTarget.setPointerCapture(event.pointerId)
-    triggerHaptic(8)
     restTimerDragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -2660,9 +2660,12 @@ function App() {
 
     const deltaX = event.clientX - dragState.startX
     const deltaY = event.clientY - dragState.startY
-    const movedEnough = Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4
+    const movedEnough = Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10
     if (movedEnough) {
       dragState.dragged = true
+      if (!suppressRestTimerToggleRef.current) {
+        suppressRestTimerToggleRef.current = true
+      }
     }
     if (!dragState.dragged) {
       return
@@ -2684,10 +2687,17 @@ function App() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
+    if (dragState.dragged) {
+      triggerHaptic(8)
+    }
     restTimerDragRef.current = null
   }
 
   function handleRestTimerToggle() {
+    if (suppressRestTimerToggleRef.current) {
+      suppressRestTimerToggleRef.current = false
+      return
+    }
     triggerHaptic(10)
     setIsRestTimerExpanded((previous) => !previous)
   }
@@ -2929,7 +2939,7 @@ function App() {
                     <p key={item.name}>
                       <span>{item.name}</span>
                       <strong>{item.bestSetLabel}</strong>
-                      <small>{item.setCount}set</small>
+                      <small>{item.setCount}セット</small>
                     </p>
                   ))}
                   {homeLastWorkoutHiddenCount > 0 && (
@@ -3537,7 +3547,7 @@ function App() {
             </article>
 
             <article className="analytics-ranking-card">
-              <h3>総ボリューム伸び率ランキング</h3>
+              <h3>総負荷伸び率ランキング</h3>
               {growthRankings.volumeTop.slice(0, visibleRankingCount).map((item, index) => (
                 <div key={`volume-${item.name}`} className="analytics-ranking-item">
                   <div className="analytics-ranking-main">
@@ -3783,27 +3793,18 @@ function App() {
           className={`rest-timer-floating ${isRestTimerExpanded ? 'expanded' : ''}`}
           style={{ transform: `translate(calc(-50% + ${restTimerOffset.x}px), ${restTimerOffset.y}px)` }}
         >
-          <div className="rest-timer-anchor-row">
-            <button
-              type="button"
-              className={`rest-timer-fab-toggle ${timerRunning ? 'running' : ''}`}
-              onClick={handleRestTimerToggle}
-            >
-              <span>休憩</span>
-              <strong>{restTimerLabel}</strong>
-            </button>
-            <button
-              type="button"
-              className="rest-timer-drag-handle"
-              aria-label="タイマー位置を移動"
-              onPointerDown={handleRestTimerPointerDown}
-              onPointerMove={handleRestTimerPointerMove}
-              onPointerUp={handleRestTimerPointerUp}
-              onPointerCancel={handleRestTimerPointerUp}
-            >
-              ⠿
-            </button>
-          </div>
+          <button
+            type="button"
+            className={`rest-timer-fab-toggle ${timerRunning ? 'running' : ''}`}
+            onClick={handleRestTimerToggle}
+            onPointerDown={handleRestTimerPointerDown}
+            onPointerMove={handleRestTimerPointerMove}
+            onPointerUp={handleRestTimerPointerUp}
+            onPointerCancel={handleRestTimerPointerUp}
+          >
+            <span>休憩</span>
+            <strong>{restTimerLabel}</strong>
+          </button>
           {isRestTimerExpanded && (
             <div className="rest-timer-floating-panel">
               <div className="timer-adjust">
