@@ -1807,7 +1807,14 @@ button.secondary-btn {
   display: grid;
   justify-items: center;
   gap: 8px;
-  touch-action: none;
+  touch-action: manipulation;
+}
+
+.rest-timer-anchor-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .rest-timer-fab-toggle {
@@ -1846,10 +1853,18 @@ button.secondary-btn {
     rgba(6, 78, 59, 0.92);
 }
 
-.rest-timer-drag-hint {
-  color: #93c5fd;
-  font-size: 0.68rem;
-  letter-spacing: 0.02em;
+.rest-timer-drag-handle {
+  width: 42px;
+  min-height: 42px;
+  border-radius: 12px;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.94), rgba(15, 23, 42, 0.94));
+  border: 1px solid rgba(125, 211, 252, 0.34);
+  box-shadow: none;
+  touch-action: none;
 }
 
 .rest-timer-floating-panel {

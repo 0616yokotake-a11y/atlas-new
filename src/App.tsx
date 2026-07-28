@@ -1023,7 +1023,6 @@ function App() {
   const pickerOpenValueRef = useRef(0)
   const toastTimerRef = useRef<number | null>(null)
   const restTimerNoticeRef = useRef<number | null>(null)
-  const restTimerDragActivateTimerRef = useRef<number | null>(null)
   const restTimerFloatingRef = useRef<HTMLDivElement | null>(null)
   const restTimerDragRef = useRef<{
     pointerId: number
@@ -1031,10 +1030,8 @@ function App() {
     startY: number
     originX: number
     originY: number
-    ready: boolean
     dragged: boolean
   } | null>(null)
-  const suppressRestTimerToggleRef = useRef(false)
   const previousStreakDaysRef = useRef<number | null>(null)
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
   const previousMainTabRef = useRef<MainTab>('home')
@@ -1167,9 +1164,6 @@ function App() {
       }
       if (restTimerNoticeRef.current) {
         window.clearTimeout(restTimerNoticeRef.current)
-      }
-      if (restTimerDragActivateTimerRef.current) {
-        window.clearTimeout(restTimerDragActivateTimerRef.current)
       }
       if (wheelScrollTimerRef.current) {
         window.clearTimeout(wheelScrollTimerRef.current)
@@ -1799,6 +1793,34 @@ function App() {
       setIsRestTimerExpanded(false)
     }
   }, [shouldShowRestTimerFloating])
+
+  useEffect(() => {
+    if (!shouldShowRestTimerFloating || !restTimerFloatingRef.current) {
+      return
+    }
+
+    const rect = restTimerFloatingRef.current.getBoundingClientRect()
+    const minGap = 8
+    let adjustX = 0
+    let adjustY = 0
+    if (rect.left < minGap) {
+      adjustX = minGap - rect.left
+    } else if (rect.right > window.innerWidth - minGap) {
+      adjustX = window.innerWidth - minGap - rect.right
+    }
+    if (rect.top < minGap) {
+      adjustY = minGap - rect.top
+    } else if (rect.bottom > window.innerHeight - minGap) {
+      adjustY = window.innerHeight - minGap - rect.bottom
+    }
+
+    if (Math.abs(adjustX) > 0.5 || Math.abs(adjustY) > 0.5) {
+      setRestTimerOffset((previous) => ({
+        x: previous.x + adjustX,
+        y: previous.y + adjustY,
+      }))
+    }
+  }, [isRestTimerExpanded, restTimerOffset, shouldShowRestTimerFloating])
 
   function vibrateAndSetTab(nextTab: AppTab, pattern: number | number[] = 12) {
     if (nextTab !== tab) {
@@ -2457,25 +2479,15 @@ function App() {
 
   function handleRestTimerPointerDown(event: React.PointerEvent<HTMLButtonElement>) {
     event.currentTarget.setPointerCapture(event.pointerId)
-    if (restTimerDragActivateTimerRef.current) {
-      window.clearTimeout(restTimerDragActivateTimerRef.current)
-    }
+    triggerHaptic(8)
     restTimerDragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       originX: restTimerOffset.x,
       originY: restTimerOffset.y,
-      ready: false,
       dragged: false,
     }
-    restTimerDragActivateTimerRef.current = window.setTimeout(() => {
-      if (restTimerDragRef.current?.pointerId === event.pointerId) {
-        restTimerDragRef.current.ready = true
-        triggerHaptic(8)
-      }
-      restTimerDragActivateTimerRef.current = null
-    }, 180)
   }
 
   function handleRestTimerPointerMove(event: React.PointerEvent<HTMLButtonElement>) {
@@ -2487,19 +2499,16 @@ function App() {
     const deltaX = event.clientX - dragState.startX
     const deltaY = event.clientY - dragState.startY
     const movedEnough = Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4
-    if (movedEnough && dragState.ready) {
+    if (movedEnough) {
       dragState.dragged = true
     }
     if (!dragState.dragged) {
       return
     }
 
-    const floatingRect = restTimerFloatingRef.current?.getBoundingClientRect()
-    const floatingWidth = floatingRect?.width ?? 160
-    const floatingHeight = floatingRect?.height ?? 70
-    const maxX = Math.max(0, (window.innerWidth - floatingWidth) / 2 - 8)
-    const minY = -(window.innerHeight - floatingHeight - 16)
-    const maxY = 32
+    const maxX = Math.max(0, window.innerWidth / 2 - 20)
+    const minY = -(window.innerHeight - 20)
+    const maxY = Math.max(24, window.innerHeight - 120)
     const nextX = Math.max(-maxX, Math.min(maxX, dragState.originX + deltaX))
     const nextY = Math.max(minY, Math.min(maxY, dragState.originY + deltaY))
     setRestTimerOffset({ x: nextX, y: nextY })
@@ -2510,24 +2519,13 @@ function App() {
     if (!dragState || dragState.pointerId !== event.pointerId) {
       return
     }
-    if (restTimerDragActivateTimerRef.current) {
-      window.clearTimeout(restTimerDragActivateTimerRef.current)
-      restTimerDragActivateTimerRef.current = null
-    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    if (dragState.dragged) {
-      suppressRestTimerToggleRef.current = true
     }
     restTimerDragRef.current = null
   }
 
   function handleRestTimerToggle() {
-    if (suppressRestTimerToggleRef.current) {
-      suppressRestTimerToggleRef.current = false
-      return
-    }
     triggerHaptic(10)
     setIsRestTimerExpanded((previous) => !previous)
   }
@@ -3582,19 +3580,27 @@ function App() {
           className={`rest-timer-floating ${isRestTimerExpanded ? 'expanded' : ''}`}
           style={{ transform: `translate(calc(-50% + ${restTimerOffset.x}px), ${restTimerOffset.y}px)` }}
         >
-          <button
-            type="button"
-            className={`rest-timer-fab-toggle ${timerRunning ? 'running' : ''}`}
-            onClick={handleRestTimerToggle}
-            onPointerDown={handleRestTimerPointerDown}
-            onPointerMove={handleRestTimerPointerMove}
-            onPointerUp={handleRestTimerPointerUp}
-            onPointerCancel={handleRestTimerPointerUp}
-          >
-            <span>休憩</span>
-            <strong>{restTimerLabel}</strong>
-          </button>
-          <small className="rest-timer-drag-hint">長押しで移動</small>
+          <div className="rest-timer-anchor-row">
+            <button
+              type="button"
+              className={`rest-timer-fab-toggle ${timerRunning ? 'running' : ''}`}
+              onClick={handleRestTimerToggle}
+            >
+              <span>休憩</span>
+              <strong>{restTimerLabel}</strong>
+            </button>
+            <button
+              type="button"
+              className="rest-timer-drag-handle"
+              aria-label="タイマー位置を移動"
+              onPointerDown={handleRestTimerPointerDown}
+              onPointerMove={handleRestTimerPointerMove}
+              onPointerUp={handleRestTimerPointerUp}
+              onPointerCancel={handleRestTimerPointerUp}
+            >
+              ⠿
+            </button>
+          </div>
           {isRestTimerExpanded && (
             <div className="rest-timer-floating-panel">
               <div className="timer-adjust">
