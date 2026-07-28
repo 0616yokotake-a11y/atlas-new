@@ -1009,6 +1009,7 @@ function App() {
   const [toastState, setToastState] = useState<{ message: string; tone: 'default' | 'error' } | null>(null)
   const [isRestTimerExpanded, setIsRestTimerExpanded] = useState(false)
   const [restTimerNotice, setRestTimerNotice] = useState<string | null>(null)
+  const [restTimerOffset, setRestTimerOffset] = useState({ x: 0, y: 0 })
   const [isLandscapeBlocked, setIsLandscapeBlocked] = useState(false)
   const [exerciseSetDrafts, setExerciseSetDrafts] = useState<
     Record<string, Array<Pick<ExerciseSet, 'weight' | 'reps'>>>
@@ -1022,6 +1023,15 @@ function App() {
   const pickerOpenValueRef = useRef(0)
   const toastTimerRef = useRef<number | null>(null)
   const restTimerNoticeRef = useRef<number | null>(null)
+  const restTimerDragRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    originX: number
+    originY: number
+    dragged: boolean
+  } | null>(null)
+  const suppressRestTimerToggleRef = useRef(false)
   const previousStreakDaysRef = useRef<number | null>(null)
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
   const previousMainTabRef = useRef<MainTab>('home')
@@ -1776,7 +1786,7 @@ function App() {
   }, [selectedExercise, sets, workoutPhase])
 
   const restTimerLabel = `${String(Math.floor(restSeconds / 60)).padStart(2, '0')}:${String(restSeconds % 60).padStart(2, '0')}`
-  const shouldShowRestTimerFloating = (tab === 'workout' && workoutPhase === 'record') || timerRunning
+  const shouldShowRestTimerFloating = tab !== 'settings' && (workoutPhase === 'record' || timerRunning)
 
   useEffect(() => {
     if (!shouldShowRestTimerFloating) {
@@ -2437,6 +2447,62 @@ function App() {
       setRestTimerNotice(null)
       restTimerNoticeRef.current = null
     }, 3200)
+  }
+
+  function handleRestTimerPointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    restTimerDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: restTimerOffset.x,
+      originY: restTimerOffset.y,
+      dragged: false,
+    }
+  }
+
+  function handleRestTimerPointerMove(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragState = restTimerDragRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+
+    const deltaX = event.clientX - dragState.startX
+    const deltaY = event.clientY - dragState.startY
+    const movedEnough = Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4
+    if (movedEnough) {
+      dragState.dragged = true
+    }
+    if (!dragState.dragged) {
+      return
+    }
+
+    const nextX = Math.max(-180, Math.min(180, dragState.originX + deltaX))
+    const nextY = Math.max(-220, Math.min(24, dragState.originY + deltaY))
+    setRestTimerOffset({ x: nextX, y: nextY })
+  }
+
+  function handleRestTimerPointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragState = restTimerDragRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (dragState.dragged) {
+      suppressRestTimerToggleRef.current = true
+    }
+    restTimerDragRef.current = null
+  }
+
+  function handleRestTimerToggle() {
+    if (suppressRestTimerToggleRef.current) {
+      suppressRestTimerToggleRef.current = false
+      return
+    }
+    triggerHaptic(10)
+    setIsRestTimerExpanded((previous) => !previous)
   }
 
   function startWorkoutFlow(forceReset = false) {
@@ -3484,14 +3550,18 @@ function App() {
       {toastState && <div className={`toast ${toastState.tone === 'error' ? 'toast-error' : ''}`}>{toastState.message}</div>}
       {restTimerNotice && <div className="rest-timer-notice">{restTimerNotice}</div>}
       {shouldShowRestTimerFloating && (
-        <div className={`rest-timer-floating ${isRestTimerExpanded ? 'expanded' : ''}`}>
+        <div
+          className={`rest-timer-floating ${isRestTimerExpanded ? 'expanded' : ''}`}
+          style={{ transform: `translate(calc(-50% + ${restTimerOffset.x}px), ${restTimerOffset.y}px)` }}
+        >
           <button
             type="button"
             className={`rest-timer-fab-toggle ${timerRunning ? 'running' : ''}`}
-            onClick={() => {
-              triggerHaptic(10)
-              setIsRestTimerExpanded((previous) => !previous)
-            }}
+            onClick={handleRestTimerToggle}
+            onPointerDown={handleRestTimerPointerDown}
+            onPointerMove={handleRestTimerPointerMove}
+            onPointerUp={handleRestTimerPointerUp}
+            onPointerCancel={handleRestTimerPointerUp}
           >
             <span>休憩</span>
             <strong>{restTimerLabel}</strong>
