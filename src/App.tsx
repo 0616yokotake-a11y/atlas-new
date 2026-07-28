@@ -2001,7 +2001,7 @@ function App() {
   }, [growthRankings.volumeTop])
 
   const recoveryAlerts = useMemo(() => {
-    const alerts: string[] = []
+    const alerts: Array<{ severity: 'safe' | 'warn' | 'high'; icon: string; title: string; detail: string }> = []
     const now = dayjs()
     const recentPartCounts = new Map<BodyPart, number>()
     sessions
@@ -2016,19 +2016,34 @@ function App() {
       .slice(0, 2)
 
     overloadParts.forEach(([part, count]) => {
-      alerts.push(`${part}は直近3日で${count}回。疲労兆候があるため、フォーム重視か負荷調整を推奨。`)
+      alerts.push({
+        severity: count >= 3 ? 'high' : 'warn',
+        icon: count >= 3 ? '🚨' : '⚠️',
+        title: `${part}の負荷が高め`,
+        detail: `直近3日で${count}回実施。フォーム重視日または負荷を5〜10%下げた調整日を推奨。`,
+      })
     })
 
     const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
     if (previousWindowVolume > 0) {
       const increaseRate = ((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100
       if (increaseRate >= 25) {
-        alerts.push(`総ボリュームが前期間比+${Math.round(increaseRate)}%。疲労管理のため睡眠・休養を優先しましょう。`)
+        alerts.push({
+          severity: increaseRate >= 40 ? 'high' : 'warn',
+          icon: increaseRate >= 40 ? '🔥' : '📈',
+          title: 'ボリューム急上昇',
+          detail: `前期間比 +${Math.round(increaseRate)}%。睡眠・栄養・休養を優先し、次回は追い込みすぎを回避。`,
+        })
       }
     }
 
     if (alerts.length === 0) {
-      alerts.push('強い過負荷シグナルは検知されませんでした。現状のペースは安定しています。')
+      alerts.push({
+        severity: 'safe',
+        icon: '✅',
+        title: '回復バランスは良好',
+        detail: '強い過負荷シグナルは検知されませんでした。現状のペースを継続できます。',
+      })
     }
 
     return alerts.slice(0, 3)
@@ -2096,6 +2111,42 @@ function App() {
       action2,
     ]
   }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, bodyPartWindowCounts, previousWindowVolume, sessions])
+
+  const analyticsSummaryCards = useMemo(() => {
+    const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
+    const volumeTrendPercent =
+      previousWindowVolume <= 0
+        ? currentWindowVolume > 0
+          ? null
+          : 0
+        : Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100)
+    const topPart = [...bodyPartWindowCounts].sort((left, right) => right.count - left.count)[0]
+    const topWeight = growthRankings.weightTop[0]
+
+    return [
+      {
+        icon: '🧠',
+        label: 'トレーニングタイプ',
+        title: analyticsNarrativeSummary[0]?.replace('あなたの直近傾向は「', '').replace('」。', '') ?? '判定中',
+        detail: analyticsNarrativeSummary[1] ?? 'データを蓄積中です。',
+      },
+      {
+        icon: '📊',
+        label: analyticsWindowDays === 7 ? '直近7日の勢い' : '直近30日の勢い',
+        title:
+          volumeTrendPercent === null
+            ? '初回基準を作成中'
+            : `${volumeTrendPercent >= 0 ? '+' : ''}${volumeTrendPercent}%`,
+        detail: `総ボリューム ${currentWindowVolume.toLocaleString()}kg`,
+      },
+      {
+        icon: '🎯',
+        label: '主軸',
+        title: topPart ? `${topPart.part} (${topPart.count}回)` : '判定中',
+        detail: topWeight ? `重量伸びトップ: ${topWeight.name} ${topWeight.weightGrowthLabel}` : '伸び率データを蓄積中',
+      },
+    ]
+  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsNarrativeSummary, analyticsWindowDays, bodyPartWindowCounts, growthRankings.weightTop, previousWindowVolume])
 
   const bodyPartWindowCountsInsight = useMemo(() => {
     if (bodyPartWindowCounts.length === 0) {
@@ -3134,8 +3185,22 @@ function App() {
 
           <section className="analytics-ai-summary">
             <h3>総合サマリー</h3>
-            {[...analyticsNarrativeSummary, ...analyticsLocalSummary]
-              .slice(0, isProUnlocked ? 6 : 4)
+            <div className="analytics-summary-card-grid">
+              {analyticsSummaryCards.map((card) => (
+                <article key={`${card.label}-${card.title}`} className="analytics-summary-card">
+                  <div className="analytics-summary-head">
+                    <span className="analytics-summary-icon" aria-hidden="true">{card.icon}</span>
+                    <div>
+                      <small>{card.label}</small>
+                      <strong>{card.title}</strong>
+                    </div>
+                  </div>
+                  <p>{card.detail}</p>
+                </article>
+              ))}
+            </div>
+            {[...analyticsNarrativeSummary.slice(3), ...analyticsLocalSummary]
+              .slice(0, isProUnlocked ? 4 : 2)
               .map((text) => (
               <p key={text} className="feedback-line">・{text}</p>
             ))}
@@ -3207,7 +3272,13 @@ function App() {
             <article className="analytics-ranking-card">
               <h3>疲労・回復アラート</h3>
               {visibleRecoveryAlerts.map((alert) => (
-                <p key={alert} className="analytics-alert-line">・{alert}</p>
+                <article key={`${alert.title}-${alert.detail}`} className={`analytics-alert-item ${alert.severity}`}>
+                  <div className="analytics-alert-head">
+                    <span aria-hidden="true">{alert.icon}</span>
+                    <strong>{alert.title}</strong>
+                  </div>
+                  <p>{alert.detail}</p>
+                </article>
               ))}
               {!isProUnlocked && recoveryAlerts.length - visibleRecoveryAlerts.length > 0 && (
                 <p className="analytics-pro-teaser">+{recoveryAlerts.length - visibleRecoveryAlerts.length}件は Pro で解放</p>
