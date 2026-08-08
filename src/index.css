@@ -1487,19 +1487,32 @@ button.secondary-btn {
 
 .analytics-period-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   overflow-x: auto;
-  padding-bottom: 2px;
+  padding: 4px 1px 2px;
   -webkit-overflow-scrolling: touch;
 }
 
 .analytics-period-row .chip-button {
   flex: 0 0 auto;
   min-width: 0;
-  min-height: 32px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
   font-size: 0.74rem;
+  line-height: 1;
   justify-content: center;
+  background: rgba(15, 23, 42, 0.56);
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  box-shadow: none;
+  color: #cbd5e1;
+}
+
+.analytics-period-row .chip-button.active {
+  background: rgba(8, 47, 73, 0.44);
+  border-color: rgba(125, 211, 252, 0.5);
+  color: #e0f2fe;
+  box-shadow: inset 0 0 0 1px rgba(186, 230, 253, 0.08);
 }
 
 .analytics-panel-row .chip-button {

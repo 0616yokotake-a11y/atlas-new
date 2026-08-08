@@ -48,6 +48,20 @@ type ExercisePreference = {
   restSeconds: number
   metricType?: ExerciseMetricType
 }
+
+function normalizeExercisePreferences(preferences: Record<string, ExercisePreference>) {
+  return Object.entries(preferences).reduce<Record<string, ExercisePreference>>((normalized, [draftKey, preference]) => {
+    const exerciseName = draftKey.includes(':') ? draftKey.slice(draftKey.indexOf(':') + 1) : draftKey
+    normalized[draftKey] = {
+      restSeconds:
+        typeof preference.restSeconds === 'number' && preference.restSeconds > 0
+          ? preference.restSeconds
+          : getExerciseInputProfile(exerciseName).defaultRestSeconds,
+      metricType: normalizeExerciseMetricType(exerciseName, preference.metricType),
+    }
+    return normalized
+  }, {})
+}
 type PickerStepSettings = {
   weightStep: number
   repStep: number
@@ -166,6 +180,14 @@ const TIME_BASED_EXERCISES = new Set([
 
 function isTimeBasedExercise(exerciseName: string): boolean {
   return TIME_BASED_EXERCISES.has(exerciseName)
+}
+
+function normalizeExerciseMetricType(exerciseName: string, metricType?: ExerciseMetricType): ExerciseMetricType {
+  if (isTimeBasedExercise(exerciseName)) {
+    return 'time'
+  }
+
+  return metricType ?? getDefaultExerciseMetricType(exerciseName)
 }
 
 function getBodyProfileInsight(profile: BodyProfile) {
@@ -456,7 +478,7 @@ function getExerciseSetVolume(set: Pick<ExerciseSet, 'weight' | 'reps' | 'durati
 }
 
 function resolveExerciseMetricType(exercise: { name: string; metricType?: ExerciseMetricType }): ExerciseMetricType {
-  return exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
+  return normalizeExerciseMetricType(exercise.name, exercise.metricType)
 }
 
 function getWorkoutSessionVolume(session: WorkoutSession): number {
@@ -1651,7 +1673,7 @@ function loadUserSettingsSyncSnapshot(): UserSettingsSnapshot | null {
     const parsed = JSON.parse(raw) as Partial<UserSettingsSnapshot>
     return {
       exerciseNotes: parsed.exerciseNotes ?? {},
-      exercisePreferences: parsed.exercisePreferences ?? {},
+      exercisePreferences: normalizeExercisePreferences(parsed.exercisePreferences ?? {}),
       proUnlocked: Boolean(parsed.proUnlocked),
       trainingGoal: normalizeTrainingGoal(parsed.trainingGoal),
       myMenus: Array.isArray(parsed.myMenus) ? parsed.myMenus : [],
@@ -1703,7 +1725,7 @@ function loadExercisePreferences(): Record<string, ExercisePreference> {
 
   try {
     const parsed = JSON.parse(raw) as Record<string, ExercisePreference>
-    return parsed ?? {}
+    return normalizeExercisePreferences(parsed ?? {})
   } catch (error) {
     console.error('Failed to load exercise preferences', error)
     window.localStorage.removeItem(EXERCISE_PREFERENCES_STORAGE_KEY)
@@ -1835,7 +1857,7 @@ function isUserSettingsSnapshotEqual(left: UserSettingsSnapshot, right: UserSett
 function normalizeUserSettingsSnapshot(snapshot: UserSettingsSnapshot): UserSettingsSnapshot {
   return {
     exerciseNotes: snapshot.exerciseNotes,
-    exercisePreferences: snapshot.exercisePreferences,
+    exercisePreferences: normalizeExercisePreferences(snapshot.exercisePreferences),
     proUnlocked: snapshot.proUnlocked,
     trainingGoal: snapshot.trainingGoal,
     myMenus: snapshot.myMenus,
@@ -3140,7 +3162,7 @@ function App() {
       .forEach((session) => {
         const performedAt = dayjs(session.date).valueOf()
         session.exercises.forEach((exercise) => {
-          const metricType = exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
+          const metricType = resolveExerciseMetricType(exercise)
           const sessionBestSet = exercise.sets.reduce((best, set) => {
             if (set.weight > best.weight) {
               return set
@@ -3281,7 +3303,7 @@ function App() {
 
   const selectedExerciseMetricType = useMemo(() => {
     const draftKey = getExerciseDraftKey(selectedBodyPart, selectedExercise)
-    return exercisePreferences[draftKey]?.metricType ?? getDefaultExerciseMetricType(selectedExercise)
+    return normalizeExerciseMetricType(selectedExercise, exercisePreferences[draftKey]?.metricType)
   }, [exercisePreferences, selectedBodyPart, selectedExercise])
 
   const hasWorkoutDraft = useMemo(() => {
@@ -3455,7 +3477,7 @@ function App() {
     const now = dayjs()
     const sumSessionVolume = (session: WorkoutSession) =>
       session.exercises.reduce((exerciseSum, exercise) => {
-        const metricType = exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
+        const metricType = resolveExerciseMetricType(exercise)
         return exerciseSum + exercise.sets.reduce((setSum, set) => setSum + getExerciseSetVolume(set, metricType), 0)
       }, 0)
     const weeklyTotal = sessions
@@ -3503,7 +3525,7 @@ function App() {
 
       const bucket: 'current' | 'previous' = dayDiff < analyticsWindowDays ? 'current' : 'previous'
       session.exercises.forEach((exercise) => {
-        const metricType = exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
+        const metricType = resolveExerciseMetricType(exercise)
         const current = exerciseStats.get(exercise.name) ?? {
           metricType,
           currentPeakMetric: 0,
@@ -3600,7 +3622,7 @@ function App() {
         (sum, session) =>
           sum +
           session.exercises.reduce((exerciseSum, exercise) => {
-            const metricType = exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)
+            const metricType = resolveExerciseMetricType(exercise)
             return exerciseSum + exercise.sets.reduce((setSum, set) => setSum + getExerciseSetVolume(set, metricType), 0)
           }, 0),
         0,
@@ -4203,7 +4225,7 @@ function App() {
 
   function getExerciseMetricType(bodyPart: BodyPart, exerciseName: string): ExerciseMetricType {
     const draftKey = getExerciseDraftKey(bodyPart, exerciseName)
-    return exercisePreferences[draftKey]?.metricType ?? getDefaultExerciseMetricType(exerciseName)
+    return normalizeExerciseMetricType(exerciseName, exercisePreferences[draftKey]?.metricType)
   }
 
   function getExercisePreferredRestSeconds(bodyPart: BodyPart, exerciseName: string): number {
@@ -4216,7 +4238,7 @@ function App() {
     setExercisePreferences((previous) => ({
       ...previous,
       [draftKey]: {
-        metricType: previous[draftKey]?.metricType ?? getDefaultExerciseMetricType(exerciseName),
+        metricType: normalizeExerciseMetricType(exerciseName, previous[draftKey]?.metricType),
         restSeconds: rest,
       },
     }))
@@ -4336,11 +4358,11 @@ function App() {
     sets: number
     restSeconds: number
   }) {
-    const metricType = getDefaultExerciseMetricType(prescription.exerciseName)
+    const metricType = normalizeExerciseMetricType(prescription.exerciseName, getDefaultExerciseMetricType(prescription.exerciseName))
     const nextSets = Array.from({ length: Math.max(1, prescription.sets) }, (_, index) => ({
       id: `${Date.now()}-${index}`,
       weight: prescription.weight,
-      reps: metricType === 'time' ? prescription.reps : prescription.reps,
+      reps: prescription.reps,
       durationSec: metricType === 'time' ? prescription.reps : undefined,
     }))
 
@@ -4389,7 +4411,7 @@ function App() {
       [getExerciseDraftKey(session.bodyPart, primaryExercise.name)]: {
         restSeconds: previous[getExerciseDraftKey(session.bodyPart, primaryExercise.name)]?.restSeconds
           ?? getExerciseInputProfile(primaryExercise.name).defaultRestSeconds,
-        metricType: primaryExercise.metricType ?? getDefaultExerciseMetricType(primaryExercise.name),
+        metricType: normalizeExerciseMetricType(primaryExercise.name, primaryExercise.metricType),
       },
     }))
     setSets(primaryExercise.sets.map((set) => ({ ...set })))
@@ -5599,7 +5621,7 @@ function App() {
                         <p key={exercise.id}>
                           {exercise.name}:{' '}
                           {exercise.sets
-                            .map((set) => formatSetLabel(set, exercise.metricType ?? getDefaultExerciseMetricType(exercise.name)))
+                            .map((set) => formatSetLabel(set, resolveExerciseMetricType(exercise)))
                             .join(' / ')}
                         </p>
                       ))}
