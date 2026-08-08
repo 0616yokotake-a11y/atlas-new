@@ -6632,6 +6632,22 @@ function App() {
         <section className="card settings-screen">
           <h2>設定</h2>
           <p>プロフィール: {user?.email ?? '未設定'}</p>
+          <div className="settings-section">
+            <button
+              type="button"
+              className="danger-btn"
+              onClick={() => {
+                if (!auth) {
+                  return
+                }
+                void signOut(auth).catch(() => {
+                  showToast('ログアウトに失敗しました', 'error')
+                })
+              }}
+            >
+              サインアウト
+            </button>
+          </div>
 
           <div className="settings-section settings-backup-section">
             <label>
