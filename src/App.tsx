@@ -2129,6 +2129,19 @@ function App() {
   const [literatureError, setLiteratureError] = useState<string | null>(null)
   const [literatureRefreshTick, setLiteratureRefreshTick] = useState(0)
   const analyticsScrollRef = useRef<HTMLDivElement | null>(null)
+  const analyticsSwipeRef = useRef<{
+    pointerId: number | null
+    startX: number
+    startY: number
+    startScrollLeft: number
+    intent: 'idle' | 'pending' | 'horizontal' | 'vertical'
+  }>({
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    startScrollLeft: 0,
+    intent: 'idle',
+  })
   const analyticsPanelRefs = useRef<Record<AnalyticsPanel, HTMLElement | null>>({
     overview: null,
     decision: null,
@@ -4274,6 +4287,112 @@ function App() {
     resetCompleteConfirm()
   }
 
+  function snapAnalyticsPanelToNearest() {
+    const container = analyticsScrollRef.current
+    if (!container) {
+      return
+    }
+
+    const panelEntries = Object.entries(analyticsPanelRefs.current) as Array<[AnalyticsPanel, HTMLElement | null]>
+    let nearestPanel: AnalyticsPanel = 'overview'
+    let nearestDistance = Number.POSITIVE_INFINITY
+
+    panelEntries.forEach(([panel, node]) => {
+      if (!node) {
+        return
+      }
+      const distance = Math.abs(container.scrollLeft - node.offsetLeft)
+      if (distance < nearestDistance) {
+        nearestDistance = distance
+        nearestPanel = panel
+      }
+    })
+
+    const target = analyticsPanelRefs.current[nearestPanel]
+    if (target) {
+      container.scrollTo({ left: target.offsetLeft, behavior: 'smooth' })
+      setAnalyticsPanel(nearestPanel)
+    }
+  }
+
+  function handleAnalyticsPanelsPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === 'mouse') {
+      return
+    }
+
+    analyticsSwipeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startScrollLeft: analyticsScrollRef.current?.scrollLeft ?? 0,
+      intent: 'pending',
+    }
+  }
+
+  function handleAnalyticsPanelsPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const state = analyticsSwipeRef.current
+    if (state.pointerId !== event.pointerId || !analyticsScrollRef.current) {
+      return
+    }
+
+    const dx = event.clientX - state.startX
+    const dy = event.clientY - state.startY
+
+    if (state.intent === 'pending') {
+      if (Math.abs(dx) < 14 && Math.abs(dy) < 14) {
+        return
+      }
+
+      state.intent = Math.abs(dx) > Math.abs(dy) * 2 ? 'horizontal' : 'vertical'
+      if (state.intent === 'horizontal') {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      }
+    }
+
+    if (state.intent !== 'horizontal') {
+      return
+    }
+
+    event.preventDefault()
+    analyticsScrollRef.current.scrollLeft = state.startScrollLeft - dx * 0.55
+  }
+
+  function resetAnalyticsSwipeState() {
+    analyticsSwipeRef.current = {
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      startScrollLeft: 0,
+      intent: 'idle',
+    }
+  }
+
+  function handleAnalyticsPanelsPointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    const state = analyticsSwipeRef.current
+    if (state.pointerId !== event.pointerId) {
+      return
+    }
+
+    if (state.intent === 'horizontal') {
+      snapAnalyticsPanelToNearest()
+    }
+
+    resetAnalyticsSwipeState()
+  }
+
+  function handleAnalyticsPanelsPointerCancel(event: React.PointerEvent<HTMLDivElement>) {
+    const state = analyticsSwipeRef.current
+    if (state.pointerId !== event.pointerId) {
+      return
+    }
+
+    if (state.intent === 'horizontal') {
+      snapAnalyticsPanelToNearest()
+    }
+
+    resetAnalyticsSwipeState()
+  }
+
   function handleAnalyticsPanelButtonClick(panel: AnalyticsPanel) {
     triggerHaptic(10)
     setAnalyticsPanel(panel)
@@ -4301,7 +4420,7 @@ function App() {
 
   function applyBodyProfileSettings() {
     setBodyProfile((previous) => ({ ...previous }))
-    showToast('体格プロフィールをアプリへ反映しました')
+    showToast('体格プロフィールを分析と処方箋に反映しました')
     triggerHaptic(12)
   }
 
@@ -5596,25 +5715,14 @@ function App() {
           </div>
           <p className="analytics-flow-hint">見る順番: 概況 → 判断 → 次回アクション</p>
 
-          <div className="chip-row analytics-panel-row">
-            {Object.entries(ANALYTICS_PANEL_TITLES).map(([panel, title]) => (
-              <button
-                key={panel}
-                type="button"
-                className={`chip-button ${analyticsPanel === panel ? 'active' : ''}`}
-                onClick={() => {
-                  handleAnalyticsPanelButtonClick(panel as AnalyticsPanel)
-                }}
-              >
-                {title}
-              </button>
-            ))}
-          </div>
-
           <div className="analytics-panels-shell">
             <div
               ref={analyticsScrollRef}
               className="analytics-panels"
+              onPointerDown={handleAnalyticsPanelsPointerDown}
+              onPointerMove={handleAnalyticsPanelsPointerMove}
+              onPointerUp={handleAnalyticsPanelsPointerUp}
+              onPointerCancel={handleAnalyticsPanelsPointerCancel}
               onScroll={(event) => {
                 const container = event.currentTarget
                 const panelEntries = Object.entries(analyticsPanelRefs.current) as Array<[AnalyticsPanel, HTMLElement | null]>
@@ -5894,6 +6002,21 @@ function App() {
               </section>
             </div>
           </div>
+
+          <div className="analytics-panel-fab" aria-label="分析パネル切り替え">
+            {Object.entries(ANALYTICS_PANEL_TITLES).map(([panel, title]) => (
+              <button
+                key={panel}
+                type="button"
+                className={`chip-button ${analyticsPanel === panel ? 'active' : ''}`}
+                onClick={() => {
+                  handleAnalyticsPanelButtonClick(panel as AnalyticsPanel)
+                }}
+              >
+                {title}
+              </button>
+            ))}
+          </div>
         </section>
       )}
 
@@ -6119,7 +6242,7 @@ function App() {
               </label>
             </div>
             <button type="button" className="secondary-btn settings-apply-btn" onClick={applyBodyProfileSettings}>
-              アプリへ反映する
+              分析へ反映する
             </button>
           </div>
 
