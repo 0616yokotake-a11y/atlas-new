@@ -4454,7 +4454,7 @@ function App() {
   const analyticsRadarChart = useMemo(() => {
     const center = 120
     const axisRadius = 82
-    const labelRadius = 108
+    const labelRadius = 126
     const ringFractions = [0.34, 0.67, 1]
     const angleStep = (Math.PI * 2) / BODY_PARTS.length
     const startAngle = -Math.PI / 2
