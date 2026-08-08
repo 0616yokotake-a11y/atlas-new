@@ -4454,7 +4454,8 @@ function App() {
   const analyticsRadarChart = useMemo(() => {
     const center = 120
     const axisRadius = 82
-    const labelRadius = 126
+    const valueLabelRadius = axisRadius + 22
+    const labelRadius = axisRadius + 58
     const ringFractions = [0.34, 0.67, 1]
     const angleStep = (Math.PI * 2) / BODY_PARTS.length
     const startAngle = -Math.PI / 2
@@ -4474,8 +4475,7 @@ function App() {
       const valueRadius = analyticsVisualSummary.maxBodyPartLoad > 0 ? axisRadius * (item.load / analyticsVisualSummary.maxBodyPartLoad) : 0
       const valuePoint = pointAt(valueRadius, angle)
       const vertexPoint = pointAt(axisRadius, angle)
-      const labelOffsetRadius = axisRadius + 14
-      const valueLabelPoint = pointAt(labelOffsetRadius, angle)
+      const valueLabelPoint = pointAt(valueLabelRadius, angle)
       const labelPoint = pointAt(labelRadius, angle)
       return {
         ...item,
@@ -6425,8 +6425,9 @@ function App() {
                               x={item.valueLabelPoint.x}
                               y={item.valueLabelPoint.y}
                               textAnchor="middle"
+                              dominantBaseline="middle"
                             >
-                              <tspan x={item.valueLabelPoint.x} dy="-0.2em">{item.load.toLocaleString()}pt</tspan>
+                              <tspan x={item.valueLabelPoint.x}>{item.load.toLocaleString()}pt</tspan>
                             </text>
                           </g>
                         ))}
