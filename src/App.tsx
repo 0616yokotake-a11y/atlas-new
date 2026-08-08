@@ -2162,6 +2162,7 @@ function App() {
   const [isUserSettingsHydrated, setIsUserSettingsHydrated] = useState(false)
   const [exerciseNoteDraft, setExerciseNoteDraft] = useState('')
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine))
   const [isProUnlocked, setIsProUnlocked] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem(PRO_UNLOCKED_STORAGE_KEY) === '1'
@@ -2247,6 +2248,25 @@ function App() {
       setUser(nextUser)
       setLoading(false)
     })
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const updateOnlineState = () => {
+      setIsOnline(window.navigator.onLine)
+    }
+
+    updateOnlineState()
+    window.addEventListener('online', updateOnlineState)
+    window.addEventListener('offline', updateOnlineState)
+
+    return () => {
+      window.removeEventListener('online', updateOnlineState)
+      window.removeEventListener('offline', updateOnlineState)
+    }
   }, [])
 
   useEffect(() => {
@@ -2727,6 +2747,37 @@ function App() {
   }, [db, setSessions, user])
 
   const canUseApp = Boolean(user)
+  const syncBadge = useMemo(() => {
+    const statusTone = syncStatus.includes('同期エラー')
+      ? 'error'
+      : syncStatus.includes('同期待機中')
+        ? 'pending'
+        : syncStatus.includes('同期済み')
+          ? 'ready'
+          : 'local'
+    const title =
+      !isOnline && statusTone !== 'error'
+        ? 'オフライン保存'
+        : statusTone === 'ready'
+          ? 'クラウド同期済み'
+          : statusTone === 'pending'
+            ? '同期待機中'
+            : statusTone === 'error'
+              ? '同期エラー'
+              : 'ローカル保存'
+    const detail =
+      !isOnline
+        ? 'ネット復帰で同期'
+        : statusTone === 'ready'
+          ? 'クラウド接続中'
+          : statusTone === 'pending'
+            ? '再同期待ち'
+            : statusTone === 'error'
+              ? '再試行します'
+              : '端末に保存'
+    const tone = !isOnline ? 'offline' : statusTone
+    return { title, detail, tone }
+  }, [isOnline, syncStatus])
 
   const historyMonth = useMemo(() => dayjs(historyMonthCursor), [historyMonthCursor])
 
@@ -4947,7 +4998,13 @@ function App() {
         <h1 className="brand-title">Atlas</h1>
         <div className="header-meta">
           <p className="header-email">{user?.email ?? ''}</p>
-          <p className="sync-badge">{syncStatus}</p>
+          <p className={`sync-badge tone-${syncBadge.tone}`}>
+            <span className="sync-badge-main">
+              <span className="sync-badge-dot" aria-hidden="true" />
+              <strong>{syncBadge.title}</strong>
+            </span>
+            <small>{syncBadge.detail}</small>
+          </p>
         </div>
         <button
           type="button"
