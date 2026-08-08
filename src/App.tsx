@@ -4470,6 +4470,20 @@ function App() {
       return `${point.x.toFixed(1)},${point.y.toFixed(1)}`
     }
 
+    const getAxisTextLayout = (angle: number) => {
+      const cos = Math.cos(angle)
+      const sin = Math.sin(angle)
+      const isHorizontal = Math.abs(cos) > 0.45
+      const isTop = sin < -0.45
+      const isBottom = sin > 0.45
+
+      return {
+        textAnchor: isHorizontal ? (cos > 0 ? 'start' : 'end') : 'middle',
+        labelDy: isTop ? '-0.35em' : isBottom ? '0.95em' : '0.3em',
+        valueDy: '0.25em',
+      } as const
+    }
+
     const axisItems = analyticsVisualSummary.bodyPartLoadBars.map((item, index) => {
       const angle = startAngle + angleStep * index
       const valueRadius = analyticsVisualSummary.maxBodyPartLoad > 0 ? axisRadius * (item.load / analyticsVisualSummary.maxBodyPartLoad) : 0
@@ -4477,6 +4491,7 @@ function App() {
       const vertexPoint = pointAt(axisRadius, angle)
       const valueLabelPoint = pointAt(valueLabelRadius, angle)
       const labelPoint = pointAt(labelRadius, angle)
+      const axisTextLayout = getAxisTextLayout(angle)
       return {
         ...item,
         angle,
@@ -4485,6 +4500,7 @@ function App() {
         vertexPoint,
         valueLabelPoint,
         labelPoint,
+        axisTextLayout,
         percent: analyticsVisualSummary.maxBodyPartLoad > 0 ? Math.round((item.load / analyticsVisualSummary.maxBodyPartLoad) * 100) : 0,
       }
     })
@@ -6416,18 +6432,19 @@ function App() {
                               className="analytics-radar-label"
                               x={item.labelPoint.x}
                               y={item.labelPoint.y}
-                              textAnchor={item.labelPoint.x < 120 ? 'end' : item.labelPoint.x > 120 ? 'start' : 'middle'}
+                              textAnchor={item.axisTextLayout.textAnchor}
+                              dominantBaseline="middle"
                             >
-                              <tspan x={item.labelPoint.x}>{item.part}</tspan>
+                              <tspan x={item.labelPoint.x} dy={item.axisTextLayout.labelDy}>{item.part}</tspan>
                             </text>
                             <text
                               className="analytics-radar-value"
                               x={item.valueLabelPoint.x}
                               y={item.valueLabelPoint.y}
-                              textAnchor="middle"
+                              textAnchor={item.axisTextLayout.textAnchor}
                               dominantBaseline="middle"
                             >
-                              <tspan x={item.valueLabelPoint.x}>{item.load.toLocaleString()}pt</tspan>
+                              <tspan x={item.valueLabelPoint.x} dy={item.axisTextLayout.valueDy}>{item.load.toLocaleString()}pt</tspan>
                             </text>
                           </g>
                         ))}
