@@ -1972,6 +1972,7 @@ function App() {
   const [isLiteratureLoading, setIsLiteratureLoading] = useState(false)
   const [literatureError, setLiteratureError] = useState<string | null>(null)
   const [literatureRefreshTick, setLiteratureRefreshTick] = useState(0)
+  const analyticsScrollRef = useRef<HTMLDivElement | null>(null)
   const analyticsPanelRefs = useRef<Record<AnalyticsPanel, HTMLElement | null>>({
     overview: null,
     decision: null,
@@ -2256,12 +2257,15 @@ function App() {
       return
     }
 
-    analyticsPanelRefs.current[analyticsPanel]?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'nearest',
-      inline: 'start',
-    })
-  }, [analyticsPanel, tab])
+    const container = analyticsScrollRef.current
+    const target = analyticsPanelRefs.current[analyticsPanel]
+    if (container && target) {
+      container.scrollTo({
+        left: target.offsetLeft,
+        behavior: 'auto',
+      })
+    }
+  }, [tab])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -5368,29 +5372,6 @@ function App() {
           </div>
           <p className="analytics-flow-hint">見る順番: 概況 → 判断 → 次回アクション</p>
 
-          <div className="chip-row analytics-period-row">
-            <button
-              type="button"
-              className={`chip-button ${analyticsWindowDays === 7 ? 'active' : ''}`}
-              onClick={() => {
-                triggerHaptic(10)
-                setAnalyticsWindowDays(7)
-              }}
-            >
-              7日比較
-            </button>
-            <button
-              type="button"
-              className={`chip-button ${analyticsWindowDays === 30 ? 'active' : ''}`}
-              onClick={() => {
-                triggerHaptic(10)
-                setAnalyticsWindowDays(30)
-              }}
-            >
-              30日比較
-            </button>
-          </div>
-
           <div className="chip-row analytics-panel-row">
             {Object.entries(ANALYTICS_PANEL_TITLES).map(([panel, title]) => (
               <button
@@ -5399,7 +5380,16 @@ function App() {
                 className={`chip-button ${analyticsPanel === panel ? 'active' : ''}`}
                 onClick={() => {
                   triggerHaptic(10)
-                  setAnalyticsPanel(panel as AnalyticsPanel)
+                  const nextPanel = panel as AnalyticsPanel
+                  setAnalyticsPanel(nextPanel)
+                  const container = analyticsScrollRef.current
+                  const target = analyticsPanelRefs.current[nextPanel]
+                  if (container && target) {
+                    container.scrollTo({
+                      left: target.offsetLeft,
+                      behavior: 'smooth',
+                    })
+                  }
                 }}
               >
                 {title}
@@ -5408,7 +5398,31 @@ function App() {
           </div>
 
           <div className="analytics-panels-shell">
-            <div className="analytics-panels">
+            <div
+              ref={analyticsScrollRef}
+              className="analytics-panels"
+              onScroll={(event) => {
+                const container = event.currentTarget
+                const panelEntries = Object.entries(analyticsPanelRefs.current) as Array<[AnalyticsPanel, HTMLElement | null]>
+                let nearestPanel: AnalyticsPanel = analyticsPanel
+                let nearestDistance = Number.POSITIVE_INFINITY
+
+                panelEntries.forEach(([panel, node]) => {
+                  if (!node) {
+                    return
+                  }
+                  const distance = Math.abs(container.scrollLeft - node.offsetLeft)
+                  if (distance < nearestDistance) {
+                    nearestDistance = distance
+                    nearestPanel = panel
+                  }
+                })
+
+                if (nearestPanel !== analyticsPanel) {
+                  setAnalyticsPanel(nearestPanel)
+                }
+              }}
+            >
               <section
                 ref={(node) => {
                   analyticsPanelRefs.current.overview = node
@@ -5418,6 +5432,29 @@ function App() {
                 <div className="analytics-panel-heading">
                   <span className="badge">1/3</span>
                   <h3>概況</h3>
+                </div>
+
+                <div className="chip-row analytics-period-row">
+                  <button
+                    type="button"
+                    className={`chip-button ${analyticsWindowDays === 7 ? 'active' : ''}`}
+                    onClick={() => {
+                      triggerHaptic(10)
+                      setAnalyticsWindowDays(7)
+                    }}
+                  >
+                    7日比較
+                  </button>
+                  <button
+                    type="button"
+                    className={`chip-button ${analyticsWindowDays === 30 ? 'active' : ''}`}
+                    onClick={() => {
+                      triggerHaptic(10)
+                      setAnalyticsWindowDays(30)
+                    }}
+                  >
+                    30日比較
+                  </button>
                 </div>
 
                 <section className="analytics-graph-grid">
@@ -5685,45 +5722,49 @@ function App() {
           {isLiteratureLoading ? (
             <p className="sources-status">最新文献を取得中...</p>
           ) : literatureError ? (
-            <div className="analytics-ranking-card">
-              <p className="sources-status error">{literatureError}</p>
-              <div className="analytics-source-list">
-                {ANALYTICS_EVIDENCE_SOURCES.map((source) => (
-                  <a
-                    key={source.url}
-                    className="analytics-source-item"
-                    href={source.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <strong>{source.title}</strong>
-                    <small>{source.takeaway}</small>
-                  </a>
-                ))}
+            <div className="sources-list-scroll">
+              <div className="analytics-ranking-card">
+                <p className="sources-status error">{literatureError}</p>
+                <div className="analytics-source-list">
+                  {ANALYTICS_EVIDENCE_SOURCES.map((source) => (
+                    <a
+                      key={source.url}
+                      className="analytics-source-item"
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <strong>{source.title}</strong>
+                      <small>{source.takeaway}</small>
+                    </a>
+                  ))}
+                </div>
               </div>
             </div>
           ) : (
-            literatureSections.map((section) => (
-              <article key={section.query} className="analytics-ranking-card">
-                <h3>{section.title}</h3>
-                {section.articles.length === 0 ? (
-                  <p className="sources-status">該当文献が見つかりませんでした。</p>
-                ) : (
-                  section.articles.map((article) => (
-                    <a key={article.pmid} className="sources-article" href={article.url} target="_blank" rel="noreferrer">
-                      <div className="analytics-summary-head">
-                        <span className="analytics-summary-icon" aria-hidden="true">📄</span>
-                        <div>
-                          <small>{article.journal} / {article.pubDate}</small>
-                          <strong>{article.title}</strong>
+            <div className="sources-list-scroll">
+              {literatureSections.map((section) => (
+                <article key={section.query} className="analytics-ranking-card">
+                  <h3>{section.title}</h3>
+                  {section.articles.length === 0 ? (
+                    <p className="sources-status">該当文献が見つかりませんでした。</p>
+                  ) : (
+                    section.articles.map((article) => (
+                      <a key={article.pmid} className="sources-article" href={article.url} target="_blank" rel="noreferrer">
+                        <div className="analytics-summary-head">
+                          <span className="analytics-summary-icon" aria-hidden="true">📄</span>
+                          <div>
+                            <small>{article.journal} / {article.pubDate}</small>
+                            <strong>{article.title}</strong>
+                          </div>
                         </div>
-                      </div>
-                      <p>{article.snippet}</p>
-                    </a>
-                  ))
-                )}
-              </article>
-            ))
+                        <p>{article.snippet}</p>
+                      </a>
+                    ))
+                  )}
+                </article>
+              ))}
+            </div>
           )}
 
           {literatureUpdatedAt && <p className="sources-status">更新時刻: {dayjs(literatureUpdatedAt).format('YYYY/MM/DD HH:mm')}</p>}

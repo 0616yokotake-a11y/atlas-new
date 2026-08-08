@@ -1395,6 +1395,15 @@ button.secondary-btn {
   gap: 10px;
 }
 
+.sources-list-scroll {
+  display: grid;
+  gap: 8px;
+  max-height: min(54dvh, 520px);
+  overflow-y: auto;
+  padding-right: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
 .sources-hero {
   display: grid;
   gap: 8px;
