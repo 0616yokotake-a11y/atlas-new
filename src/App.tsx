@@ -4308,6 +4308,26 @@ function App() {
     triggerHaptic(12)
   }
 
+  function applyProSettings() {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(PRO_UNLOCKED_STORAGE_KEY, isProUnlocked ? '1' : '0')
+    }
+    showToast('Pro設定をアプリへ反映しました')
+    triggerHaptic(12)
+  }
+
+  function applyPickerStepSettings() {
+    setPickerStepSettings((previous) => ({ ...previous }))
+    showToast('ホイール刻みをアプリへ反映しました')
+    triggerHaptic(12)
+  }
+
+  function applyTrainingGoalSettings() {
+    saveTrainingGoal(trainingGoal)
+    showToast('トレーニング目的を分析と文献に反映しました')
+    triggerHaptic(12)
+  }
+
   function startPrescriptionWorkout(prescription: {
     part: BodyPart
     exerciseName: string
@@ -6029,6 +6049,9 @@ function App() {
             >
               {isProUnlocked ? '課金状態（仮）: ON' : '課金する（仮）'}
             </button>
+            <button type="button" className="secondary-btn settings-apply-btn" onClick={applyProSettings}>
+              Pro設定を反映する
+            </button>
           </div>
 
           <div className="settings-section">
@@ -6071,6 +6094,9 @@ function App() {
                 </select>
               </label>
             </div>
+            <button type="button" className="secondary-btn settings-apply-btn" onClick={applyPickerStepSettings}>
+              刻みを反映する
+            </button>
           </div>
 
           <div className="settings-section">
@@ -6153,6 +6179,9 @@ function App() {
                 </select>
               </label>
             </div>
+            <button type="button" className="secondary-btn settings-apply-btn" onClick={applyTrainingGoalSettings}>
+              目的を反映する
+            </button>
           </div>
 
           <button type="button" onClick={logout}>
