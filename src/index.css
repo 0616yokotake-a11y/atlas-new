@@ -1494,9 +1494,11 @@ button.secondary-btn {
 }
 
 .analytics-period-row .chip-button {
-  flex: 1;
+  flex: 0 0 auto;
   min-width: 0;
-  min-height: 40px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.74rem;
   justify-content: center;
 }
 

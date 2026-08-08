@@ -2153,6 +2153,7 @@ function App() {
   const [pickerValue, setPickerValue] = useState(0)
   const [isSavingWorkout, setIsSavingWorkout] = useState(false)
   const [toastState, setToastState] = useState<{ message: string; tone: 'default' | 'error' } | null>(null)
+  const [workoutDraftReturnTab, setWorkoutDraftReturnTab] = useState<'home' | 'history' | null>(null)
   const [isRestTimerExpanded, setIsRestTimerExpanded] = useState(false)
   const [restTimerNotice, setRestTimerNotice] = useState<string | null>(null)
   const [restTimerOffset, setRestTimerOffset] = useState({ x: 0, y: 0 })
@@ -4258,6 +4259,7 @@ function App() {
     setExerciseSearchQuery('')
     setWorkoutPhase('body')
     setTab('workout')
+    setWorkoutDraftReturnTab(date ? 'history' : 'home')
     resetCompleteConfirm()
   }
 
@@ -4271,6 +4273,7 @@ function App() {
     setCustomExerciseInput('')
     setExerciseSearchQuery('')
     setWorkoutPhase('exercise')
+    setWorkoutDraftReturnTab('home')
     resetCompleteConfirm()
   }
 
@@ -4754,6 +4757,7 @@ function App() {
     setSets(createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType))
     setExerciseSearchQuery('')
     setCustomExerciseInput('')
+    setWorkoutDraftReturnTab('home')
     resetCompleteConfirm()
   }
 
@@ -4813,7 +4817,7 @@ function App() {
 
     setIsSavingWorkout(true)
     try {
-      const shouldReturnToHistory = Boolean(editingSessionId)
+      const shouldReturnToHistory = editingSessionId !== null || workoutDraftReturnTab === 'history'
       const baseSession = createSession(selectedBodyPart, selectedExercise, selectedExerciseMetricType, sets)
       const session = {
         ...baseSession,
@@ -4833,6 +4837,7 @@ function App() {
       } else {
         setTab('workout')
       }
+      setWorkoutDraftReturnTab(null)
       setWorkoutPhase('body')
       setSets(createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType))
       setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
