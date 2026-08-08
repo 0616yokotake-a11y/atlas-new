@@ -4932,6 +4932,7 @@ function App() {
 
     setIsSavingWorkout(true)
     try {
+      const shouldReturnToHistory = Boolean(editingSessionId)
       const baseSession = createSession(selectedBodyPart, selectedExercise, selectedExerciseMetricType, sets)
       const session = {
         ...baseSession,
@@ -4943,7 +4944,14 @@ function App() {
       } else {
         addSession(session)
       }
-      setTab('workout')
+      if (shouldReturnToHistory) {
+        const savedDate = dayjs(session.date)
+        setHistoryMonthCursor(savedDate.startOf('month').format('YYYY-MM-DD'))
+        setHistorySelectedDate(savedDate.format('YYYY-MM-DD'))
+        setTab('history')
+      } else {
+        setTab('workout')
+      }
       setWorkoutPhase('body')
       setSets(createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType))
       setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))

@@ -1155,8 +1155,10 @@ button.secondary-btn {
   gap: 8px;
   padding: 6px 0 8px;
   margin: 0;
-  background: linear-gradient(180deg, rgba(2, 6, 23, 0.88), rgba(2, 6, 23, 0.58));
-  backdrop-filter: blur(14px);
+  background:
+    linear-gradient(180deg, rgba(2, 6, 23, 0.42), rgba(2, 6, 23, 0.16)),
+    radial-gradient(120% 160% at 50% 0%, rgba(56, 189, 248, 0.08), transparent 70%);
+  backdrop-filter: blur(18px);
 }
 
 .analytics-panels-shell {
@@ -1172,7 +1174,7 @@ button.secondary-btn {
   padding-bottom: 4px;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
-  touch-action: auto;
+  touch-action: pan-y;
   overscroll-behavior-x: contain;
 }
 
