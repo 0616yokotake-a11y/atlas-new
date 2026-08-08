@@ -5633,14 +5633,26 @@ function App() {
                           </button>
                         )}
                       </div>
-                      {session.exercises.map((exercise) => (
-                        <p key={exercise.id}>
-                          {exercise.name}:{' '}
-                          {exercise.sets
-                            .map((set) => formatSetLabel(set, resolveExerciseMetricType(exercise)))
-                            .join(' / ')}
-                        </p>
-                      ))}
+                      <div className="history-item-meta">
+                        <span>{session.exercises.length}種目</span>
+                        <span>{session.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0)}セット</span>
+                        <span>{getWorkoutSessionVolume(session).toLocaleString()}pt</span>
+                      </div>
+                      <div className="history-item-exercise-list">
+                        {session.exercises.map((exercise) => {
+                          const metricType = resolveExerciseMetricType(exercise)
+                          const setSummary = exercise.sets.map((set) => formatSetLabel(set, metricType)).join(' / ')
+                          return (
+                            <div key={exercise.id} className="history-item-exercise">
+                              <div className="history-item-exercise-head">
+                                <strong>{exercise.name}</strong>
+                                <small>{metricType === 'time' ? '秒' : '回'}</small>
+                              </div>
+                              <p>{setSummary}</p>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </article>
                   ))}
               </section>

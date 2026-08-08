@@ -2639,6 +2639,91 @@ button.secondary-btn {
   gap: 6px;
 }
 
+.history-item {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.52);
+  border: 1px solid rgba(125, 211, 252, 0.16);
+}
+
+.history-item-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.history-item-head .secondary-btn,
+.history-select-btn {
+  min-height: 34px;
+}
+
+.history-item-head strong {
+  color: #e0f2fe;
+  font-size: 1rem;
+}
+
+.history-item-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.history-item-meta span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(8, 47, 73, 0.34);
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  color: #bae6fd;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.history-item-exercise-list {
+  display: grid;
+  gap: 6px;
+}
+
+.history-item-exercise {
+  display: grid;
+  gap: 4px;
+  padding: 8px 9px;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.26);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.history-item-exercise-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-item-exercise-head strong {
+  color: #f8fafc;
+  font-size: 0.9rem;
+}
+
+.history-item-exercise-head small {
+  color: #93c5fd;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.history-item-exercise p {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 .history-screen-card {
   overflow: visible;
   padding-bottom: calc(14px + env(safe-area-inset-bottom));
