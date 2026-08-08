@@ -2867,16 +2867,7 @@ function App() {
   useEffect(() => {
     setHistoryOpenDates((previous) => {
       const sectionKeys = new Set(historyDateSections.map((section) => section.date))
-      const stillOpen = previous.filter((date) => sectionKeys.has(date))
-      if (stillOpen.length > 0) {
-        return stillOpen
-      }
-
-      if (historySelectedDate && sectionKeys.has(historySelectedDate)) {
-        return [historySelectedDate]
-      }
-
-      return historyDateSections[0] ? [historyDateSections[0].date] : []
+      return previous.filter((date) => sectionKeys.has(date))
     })
   }, [historyDateSections, historySelectedDate])
 
@@ -4417,8 +4408,19 @@ function App() {
     setRestSeconds(getExercisePreferredRestSeconds(session.bodyPart, primaryExercise.name))
     setWorkoutPhase('record')
     setTimerRunning(false)
+    setWorkoutDraftReturnTab('history')
     setTab('workout')
     resetCompleteConfirm()
+  }
+
+  function handleWorkoutBackButton() {
+    triggerHaptic(12)
+    if (editingSessionId !== null) {
+      setTab('history')
+      return
+    }
+
+    setWorkoutPhase((previous) => (previous === 'record' ? 'exercise' : 'body'))
   }
 
   function handleCustomExerciseSubmit() {
@@ -5060,16 +5062,24 @@ function App() {
               <button
                 type="button"
                 className="secondary-btn"
-                onClick={() => {
-                  triggerHaptic(12)
-                  setWorkoutPhase((previous) => (previous === 'record' ? 'exercise' : 'body'))
-                }}
+                onClick={handleWorkoutBackButton}
               >
                 戻る
               </button>
             ) : (
-              <button type="button" className="secondary-btn" onClick={() => vibrateAndSetTab('home', 12)}>
-                ホーム
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => {
+                  triggerHaptic(12)
+                  if (editingSessionId !== null || workoutDraftReturnTab === 'history') {
+                    setTab('history')
+                    return
+                  }
+                  vibrateAndSetTab('home', 12)
+                }}
+              >
+                {editingSessionId !== null || workoutDraftReturnTab === 'history' ? '戻る' : 'ホーム'}
               </button>
             )}
           </div>
