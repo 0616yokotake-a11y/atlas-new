@@ -7,7 +7,7 @@ import {
   type Firestore,
   type Unsubscribe,
 } from 'firebase/firestore'
-import type { BodyPart, MyMenu, WorkoutSession } from '../types'
+import type { BodyPart, ExerciseMetricType, MyMenu, WorkoutSession } from '../types'
 
 const PENDING_SYNC_STORAGE_KEY = 'atlas.pending-sync-ops.v1'
 const MAX_PENDING_SYNC_ATTEMPTS = 8
@@ -34,10 +34,24 @@ type PendingSyncOperation =
       createdAt: string
       attempts: number
     }
+  | {
+      id: string
+      type: 'saveUserSettings'
+      userSettings: UserSettingsPayload
+      createdAt: string
+      attempts: number
+    }
 
 type PendingSyncProgress = {
   completed: number
   remaining: number
+}
+
+export type UserSettingsPayload = {
+  exerciseNotes: Record<string, string>
+  exercisePreferences: Record<string, { restSeconds: number; metricType?: ExerciseMetricType }>
+  proUnlocked: boolean
+  myMenus: MyMenu[]
 }
 
 function readPendingSyncOps(): PendingSyncOperation[] {
@@ -109,6 +123,10 @@ function userLibraryDoc(db: Firestore, uid: string) {
   return doc(db, 'users', uid, 'library', 'customExercises')
 }
 
+function userSettingsDoc(db: Firestore, uid: string) {
+  return doc(db, 'users', uid, 'settings', 'main')
+}
+
 export function subscribeSessions(
   db: Firestore,
   uid: string,
@@ -166,6 +184,31 @@ export async function saveCustomExercises(
   await setDoc(userLibraryDoc(db, uid), { customExercisesByBodyPart }, { merge: true })
 }
 
+export function subscribeUserSettings(
+  db: Firestore,
+  uid: string,
+  onChange: (userSettings: UserSettingsPayload | null) => void,
+): Unsubscribe {
+  return onSnapshot(userSettingsDoc(db, uid), (snapshot) => {
+    const data = snapshot.exists() ? (snapshot.data() as Partial<UserSettingsPayload>) : null
+    if (!data) {
+      onChange(null)
+      return
+    }
+
+    onChange({
+      exerciseNotes: data.exerciseNotes ?? {},
+      exercisePreferences: data.exercisePreferences ?? {},
+      proUnlocked: Boolean(data.proUnlocked),
+      myMenus: Array.isArray(data.myMenus) ? data.myMenus : [],
+    })
+  })
+}
+
+export async function saveUserSettings(db: Firestore, uid: string, userSettings: UserSettingsPayload) {
+  await setDoc(userSettingsDoc(db, uid), userSettings, { merge: true })
+}
+
 export function queueSessionSave(session: WorkoutSession) {
   enqueuePendingSyncOp({
     id: makePendingSyncId('save-session'),
@@ -191,6 +234,16 @@ export function queueCustomExercisesSave(customExercisesByBodyPart: Record<BodyP
     id: makePendingSyncId('save-library'),
     type: 'saveLibrary',
     customExercisesByBodyPart,
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+  })
+}
+
+export function queueUserSettingsSave(userSettings: UserSettingsPayload) {
+  enqueuePendingSyncOp({
+    id: makePendingSyncId('save-user-settings'),
+    type: 'saveUserSettings',
+    userSettings,
     createdAt: new Date().toISOString(),
     attempts: 0,
   })
@@ -224,6 +277,8 @@ export async function flushPendingSyncOps(
         await saveSession(db, uid, operation.session)
       } else if (operation.type === 'removeSession') {
         await removeSession(db, uid, operation.sessionId)
+      } else if (operation.type === 'saveUserSettings') {
+        await saveUserSettings(db, uid, operation.userSettings)
       } else {
         await saveCustomExercises(db, uid, operation.customExercisesByBodyPart)
       }

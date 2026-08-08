@@ -19,15 +19,18 @@ import { useAtlasStore } from './store/useAtlasStore'
 import {
   queueSessionDelete,
   queueCustomExercisesSave,
+  queueUserSettingsSave,
   queueSessionSave,
   removeSession,
   saveSession,
   saveCustomExercises,
+  saveUserSettings,
   subscribeCustomExercises,
+  subscribeUserSettings,
   subscribeSessions,
   flushPendingSyncOps,
 } from './lib/firestoreSync'
-import type { BodyPart, ExerciseMetricType, ExerciseSet, WorkoutSession } from './types'
+import type { BodyPart, ExerciseMetricType, ExerciseSet, MyMenu, WorkoutSession } from './types'
 
 type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'settings'
 type MainTab = Exclude<AppTab, 'settings'>
@@ -981,6 +984,90 @@ function areCustomExercisesEqual(
   })
 }
 
+function areRecordsEqual(left: Record<string, string>, right: Record<string, string>) {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  if (leftKeys.length !== rightKeys.length) {
+    return false
+  }
+
+  return leftKeys.every((key) => left[key] === right[key])
+}
+
+function areExercisePreferenceMapsEqual(
+  left: Record<string, ExercisePreference>,
+  right: Record<string, ExercisePreference>,
+) {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  if (leftKeys.length !== rightKeys.length) {
+    return false
+  }
+
+  return leftKeys.every((key) => {
+    const leftValue = left[key]
+    const rightValue = right[key]
+    return (
+      Boolean(rightValue) &&
+      leftValue.restSeconds === rightValue.restSeconds &&
+      leftValue.metricType === rightValue.metricType
+    )
+  })
+}
+
+function areMenusEqual(left: MyMenu[], right: MyMenu[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((menu, index) => {
+    const other = right[index]
+    return (
+      other &&
+      menu.id === other.id &&
+      menu.name === other.name &&
+      menu.bodyPart === other.bodyPart &&
+      menu.exercises.length === other.exercises.length &&
+      menu.exercises.every((exercise, exerciseIndex) => exercise === other.exercises[exerciseIndex])
+    )
+  })
+}
+
+function mergeStringRecord(localRecord: Record<string, string>, remoteRecord: Record<string, string>) {
+  return {
+    ...remoteRecord,
+    ...localRecord,
+  }
+}
+
+function mergeExercisePreferenceMaps(
+  localMap: Record<string, ExercisePreference>,
+  remoteMap: Record<string, ExercisePreference>,
+) {
+  return {
+    ...remoteMap,
+    ...localMap,
+  }
+}
+
+function mergeMenus(localMenus: MyMenu[], remoteMenus: MyMenu[]) {
+  const menuMap = new Map<string, MyMenu>()
+  remoteMenus.forEach((menu) => {
+    menuMap.set(menu.id, menu)
+  })
+  localMenus.forEach((menu) => {
+    menuMap.set(menu.id, menu)
+  })
+  return Array.from(menuMap.values())
+}
+
+function normalizeMenus(menus: MyMenu[]) {
+  return menus.map((menu) => ({
+    ...menu,
+    exercises: [...menu.exercises],
+  }))
+}
+
 function createSession(
   bodyPart: BodyPart,
   exerciseName: string,
@@ -1188,7 +1275,7 @@ function AuthView({
 }
 
 function App() {
-  const { sessions, setSessions, addSession, deleteSession: deleteSessionFromStore } = useAtlasStore()
+  const { sessions, myMenus, setSessions, setMyMenus, addSession, deleteSession: deleteSessionFromStore } = useAtlasStore()
   const [tab, setTab] = useState<AppTab>('home')
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1216,6 +1303,7 @@ function App() {
   >(loadCustomExercisesByBodyPart)
   const [isCustomExercisesHydrated, setIsCustomExercisesHydrated] = useState(false)
   const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>(loadExerciseNotes)
+  const [isUserSettingsHydrated, setIsUserSettingsHydrated] = useState(false)
   const [exerciseNoteDraft, setExerciseNoteDraft] = useState('')
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
   const [isProUnlocked, setIsProUnlocked] = useState(() => {
@@ -1417,6 +1505,66 @@ function App() {
         showToast('種目リストの同期に失敗しました。再試行します', 'error')
       })
   }, [customExercisesByBodyPart, db, isCustomExercisesHydrated, isDemoMode, user])
+
+  useEffect(() => {
+    if (!db || !user || isDemoMode) {
+      setIsUserSettingsHydrated(true)
+      return
+    }
+
+    const activeDb = db
+    const uid = user.uid
+    setIsUserSettingsHydrated(false)
+
+    const unsubscribeUserSettings = subscribeUserSettings(activeDb, uid, (remoteUserSettings) => {
+      if (remoteUserSettings) {
+        setExerciseNotes((current) => {
+          const merged = mergeStringRecord(current, remoteUserSettings.exerciseNotes)
+          return areRecordsEqual(current, merged) ? current : merged
+        })
+        setExercisePreferences((current) => {
+          const merged = mergeExercisePreferenceMaps(current, remoteUserSettings.exercisePreferences)
+          return areExercisePreferenceMapsEqual(current, merged) ? current : merged
+        })
+        const currentMenus = useAtlasStore.getState().myMenus
+        const mergedMenus = mergeMenus(currentMenus, remoteUserSettings.myMenus)
+        if (!areMenusEqual(currentMenus, mergedMenus)) {
+          setMyMenus(mergedMenus)
+        }
+        setIsProUnlocked((current) => current || remoteUserSettings.proUnlocked)
+      }
+      setIsUserSettingsHydrated(true)
+    })
+
+    return () => {
+      unsubscribeUserSettings()
+    }
+  }, [db, isDemoMode, setMyMenus, user])
+
+  useEffect(() => {
+    if (!db || !user || isDemoMode || !isUserSettingsHydrated) {
+      return
+    }
+
+    const activeDb = db
+    const uid = user.uid
+    const payload = {
+      exerciseNotes: mergeStringRecord({}, exerciseNotes),
+      exercisePreferences: mergeExercisePreferenceMaps({}, exercisePreferences),
+      proUnlocked: isProUnlocked,
+      myMenus: normalizeMenus(myMenus),
+    }
+
+    void saveUserSettings(activeDb, uid, payload)
+      .then(() => {
+        setSyncStatus('クラウド同期済み')
+      })
+      .catch(() => {
+        queueUserSettingsSave(payload)
+        setSyncStatus('同期待機中...')
+        showToast('設定の同期に失敗しました。再試行します', 'error')
+      })
+  }, [db, exerciseNotes, exercisePreferences, isDemoMode, isProUnlocked, isUserSettingsHydrated, myMenus, user])
 
   useEffect(() => {
     if (!exerciseInfoTarget) {
