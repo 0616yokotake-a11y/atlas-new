@@ -4452,9 +4452,9 @@ function App() {
   }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, previousWindowVolume, sessions])
 
   const analyticsRadarChart = useMemo(() => {
-    const center = 110
-    const axisRadius = 76
-    const labelRadius = 100
+    const center = 120
+    const axisRadius = 82
+    const labelRadius = 108
     const ringFractions = [0.34, 0.67, 1]
     const angleStep = (Math.PI * 2) / BODY_PARTS.length
     const startAngle = -Math.PI / 2
@@ -6384,7 +6384,7 @@ function App() {
                       <h3>部位総負荷</h3>
                     </div>
                     <div className="analytics-radar-card">
-                      <svg className="analytics-radar" viewBox="0 0 220 220" role="img" aria-label="部位ごとの総負荷六角グラフ">
+                      <svg className="analytics-radar" viewBox="0 0 240 240" role="img" aria-label="部位ごとの総負荷六角グラフ">
                         <polygon className="analytics-radar-ring" points={analyticsRadarChart.rings[0]} />
                         <polygon className="analytics-radar-ring" points={analyticsRadarChart.rings[1]} />
                         <polygon className="analytics-radar-ring" points={analyticsRadarChart.rings[2]} />
@@ -6392,8 +6392,8 @@ function App() {
                           <line
                             key={`${item.part}-axis`}
                             className="analytics-radar-axis"
-                            x1="110"
-                            y1="110"
+                            x1="120"
+                            y1="120"
                             x2={item.labelPoint.x}
                             y2={item.labelPoint.y}
                           />
@@ -6411,7 +6411,7 @@ function App() {
                               className="analytics-radar-label"
                               x={item.labelPoint.x}
                               y={item.labelPoint.y}
-                              textAnchor={item.labelPoint.x < 110 ? 'end' : item.labelPoint.x > 110 ? 'start' : 'middle'}
+                              textAnchor={item.labelPoint.x < 120 ? 'end' : item.labelPoint.x > 120 ? 'start' : 'middle'}
                             >
                               <tspan x={item.labelPoint.x}>{item.part}</tspan>
                             </text>
