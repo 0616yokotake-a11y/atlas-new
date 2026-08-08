@@ -1148,7 +1148,13 @@ button.secondary-btn {
 }
 
 .analytics-panel-row {
-  padding-bottom: 2px;
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+  padding: 6px 0 8px;
+  margin: 0 -2px;
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0.96), rgba(2, 6, 23, 0.78));
+  backdrop-filter: blur(16px);
 }
 
 .analytics-panels-shell {
@@ -1164,7 +1170,8 @@ button.secondary-btn {
   padding-bottom: 4px;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  touch-action: auto;
+  overscroll-behavior-x: contain;
 }
 
 .analytics-panels::-webkit-scrollbar {
@@ -1176,6 +1183,7 @@ button.secondary-btn {
   gap: 10px;
   min-width: 100%;
   scroll-snap-align: start;
+  scroll-snap-stop: always;
 }
 
 .analytics-panel-heading {
@@ -1398,6 +1406,12 @@ button.secondary-btn {
   font-size: 0.74rem;
   align-self: start;
   width: fit-content;
+}
+
+.settings-apply-btn {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 0.78rem;
 }
 
 .sources-screen-card {
