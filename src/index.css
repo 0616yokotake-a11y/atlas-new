@@ -2641,9 +2641,9 @@ button.secondary-btn {
 
 .history-item {
   display: grid;
-  gap: 8px;
-  padding: 10px;
-  border-radius: 14px;
+  gap: 6px;
+  padding: 8px 9px;
+  border-radius: 12px;
   background: rgba(15, 23, 42, 0.52);
   border: 1px solid rgba(125, 211, 252, 0.16);
 }
@@ -2657,12 +2657,12 @@ button.secondary-btn {
 
 .history-item-head .secondary-btn,
 .history-select-btn {
-  min-height: 34px;
+  min-height: 32px;
 }
 
 .history-item-head strong {
   color: #e0f2fe;
-  font-size: 1rem;
+  font-size: 0.96rem;
 }
 
 .history-item-meta {
@@ -2675,53 +2675,40 @@ button.secondary-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
-  padding: 0 8px;
+  min-height: 26px;
+  padding: 0 7px;
   border-radius: 999px;
   background: rgba(8, 47, 73, 0.34);
   border: 1px solid rgba(125, 211, 252, 0.16);
   color: #bae6fd;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
 }
 
 .history-item-exercise-list {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .history-item-exercise {
   display: grid;
-  gap: 4px;
-  padding: 8px 9px;
-  border-radius: 12px;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 10px;
   background: rgba(2, 6, 23, 0.26);
   border: 1px solid rgba(148, 163, 184, 0.16);
 }
 
-.history-item-exercise-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.history-item-exercise-head strong {
+.history-item-exercise strong {
   color: #f8fafc;
-  font-size: 0.9rem;
-}
-
-.history-item-exercise-head small {
-  color: #93c5fd;
-  font-size: 0.68rem;
-  font-weight: 700;
+  font-size: 0.86rem;
 }
 
 .history-item-exercise p {
   margin: 0;
   color: #cbd5e1;
-  font-size: 0.8rem;
-  line-height: 1.45;
+  font-size: 0.75rem;
+  line-height: 1.35;
 }
 
 .history-date-group {

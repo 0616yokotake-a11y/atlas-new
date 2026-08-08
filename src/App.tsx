@@ -5653,9 +5653,7 @@ function App() {
                           const setSummary = exercise.sets.map((set) => formatSetLabel(set, metricType)).join(' / ')
                           return (
                             <div key={exercise.id} className="history-item-exercise">
-                              <div className="history-item-exercise-head">
-                                <strong>{exercise.name}</strong>
-                              </div>
+                              <strong>{exercise.name}</strong>
                               <p>{setSummary}</p>
                             </div>
                           )
