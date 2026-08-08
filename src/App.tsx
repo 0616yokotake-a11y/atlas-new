@@ -6415,6 +6415,14 @@ function App() {
                             >
                               <tspan x={item.labelPoint.x}>{item.part}</tspan>
                             </text>
+                            <text
+                              className="analytics-radar-value"
+                              x={item.valuePoint.x}
+                              y={item.valuePoint.y}
+                              textAnchor="middle"
+                            >
+                              <tspan x={item.valuePoint.x} dy="-0.2em">{item.load.toLocaleString()}pt</tspan>
+                            </text>
                           </g>
                         ))}
                       </svg>

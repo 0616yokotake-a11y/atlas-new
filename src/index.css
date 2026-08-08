@@ -1355,14 +1355,20 @@ button.secondary-btn {
 
 .analytics-radar-label {
   fill: #e2e8f0;
-  font-size: 24px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .analytics-radar-label tspan:last-child {
   fill: #93c5fd;
-  font-size: 20px;
+  font-size: 10px;
   font-weight: 600;
+}
+
+.analytics-radar-value {
+  fill: #bae6fd;
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .analytics-graph-meta {
@@ -1607,10 +1613,11 @@ button.secondary-btn {
 }
 
 .analytics-period-row .chip-button {
-  min-height: 12px;
+  height: 16px;
+  min-height: 16px;
   width: 100%;
   min-width: 0;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 999px;
   font-size: 0.72rem;
   line-height: 1;
