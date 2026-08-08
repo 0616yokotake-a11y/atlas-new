@@ -3064,16 +3064,6 @@ function App() {
 
   const bodyProfileInsight = useMemo(() => getBodyProfileInsight(bodyProfile), [bodyProfile])
 
-  const homeAiMessage = useMemo(() => {
-    if (sessions.length === 0) {
-      return '最初の記録を入れよう。'
-    }
-
-    const latest = [...sessions].sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())[0]
-    const restDays = dayjs().diff(dayjs(latest.date), 'day')
-    return `前回 ${dayjs(latest.date).format('M/D')}・休養${restDays}日。${bodyProfileInsight.homeHint}`
-  }, [bodyProfileInsight.homeHint, sessions])
-
   const latestSessionSummary = useMemo(() => {
     if (sessions.length === 0) {
       return null
@@ -3288,6 +3278,14 @@ function App() {
       tone: readiness?.tone ?? 'new',
     }
   }, [bodyPartReadiness, daysSinceByBodyPart, sessions.length])
+
+  const homeRecommendationComment = useMemo(() => {
+    if (!homeRecommendedBodyPart) {
+      return '空きがある部位から入ると流れが作りやすい。'
+    }
+
+    return `${homeRecommendedBodyPart.part}から入るのが自然。${homeRecommendedBodyPart.label}の今がちょうどいい。`
+  }, [homeRecommendedBodyPart])
 
   const selectedExerciseMetricType = useMemo(() => {
     const draftKey = getExerciseDraftKey(selectedBodyPart, selectedExercise)
@@ -4949,11 +4947,7 @@ function App() {
       {tab === 'home' && (
         <section className="home-grid">
           <section className="card home-primary-card">
-            <h2>今日のひとこと</h2>
-            <p className="home-ai-main" title={homeAiMessage}>
-              {homeAiMessage}
-            </p>
-            <p className="home-primary-note">空き日数が長い部位を優先し、すぐワークアウトに入れます。</p>
+            <h2>今日のおすすめ</h2>
             {homeRecommendedBodyPart && (
               <button
                 type="button"
@@ -4965,6 +4959,7 @@ function App() {
                 <small>{homeRecommendedBodyPart.label}</small>
               </button>
             )}
+            <p className="home-primary-note">{homeRecommendationComment}</p>
           </section>
 
           <section className="home-kpi-inline">
