@@ -7,7 +7,7 @@ import {
   type Firestore,
   type Unsubscribe,
 } from 'firebase/firestore'
-import type { MyMenu, WorkoutSession } from '../types'
+import type { BodyPart, MyMenu, WorkoutSession } from '../types'
 
 const PENDING_SYNC_STORAGE_KEY = 'atlas.pending-sync-ops.v1'
 const MAX_PENDING_SYNC_ATTEMPTS = 8
@@ -24,6 +24,13 @@ type PendingSyncOperation =
       id: string
       type: 'removeSession'
       sessionId: string
+      createdAt: string
+      attempts: number
+    }
+  | {
+      id: string
+      type: 'saveLibrary'
+      customExercisesByBodyPart: Record<BodyPart, string[]>
       createdAt: string
       attempts: number
     }
@@ -80,6 +87,9 @@ function enqueuePendingSyncOp(operation: PendingSyncOperation) {
     if (item.type === 'removeSession' && operation.type === 'removeSession') {
       return item.sessionId !== operation.sessionId
     }
+    if (item.type === 'saveLibrary' && operation.type === 'saveLibrary') {
+      return false
+    }
     return true
   })
 
@@ -93,6 +103,10 @@ function userSessionsCollection(db: Firestore, uid: string) {
 
 function userMenusCollection(db: Firestore, uid: string) {
   return collection(db, 'users', uid, 'myMenus')
+}
+
+function userLibraryDoc(db: Firestore, uid: string) {
+  return doc(db, 'users', uid, 'library', 'customExercises')
 }
 
 export function subscribeSessions(
@@ -133,6 +147,25 @@ export async function removeMyMenu(db: Firestore, uid: string, menuId: string) {
   await deleteDoc(doc(db, 'users', uid, 'myMenus', menuId))
 }
 
+export function subscribeCustomExercises(
+  db: Firestore,
+  uid: string,
+  onChange: (customExercisesByBodyPart: Record<BodyPart, string[]> | null) => void,
+): Unsubscribe {
+  return onSnapshot(userLibraryDoc(db, uid), (snapshot) => {
+    const data = snapshot.exists() ? (snapshot.data() as { customExercisesByBodyPart?: Record<BodyPart, string[]> }) : null
+    onChange(data?.customExercisesByBodyPart ?? null)
+  })
+}
+
+export async function saveCustomExercises(
+  db: Firestore,
+  uid: string,
+  customExercisesByBodyPart: Record<BodyPart, string[]>,
+) {
+  await setDoc(userLibraryDoc(db, uid), { customExercisesByBodyPart }, { merge: true })
+}
+
 export function queueSessionSave(session: WorkoutSession) {
   enqueuePendingSyncOp({
     id: makePendingSyncId('save-session'),
@@ -148,6 +181,16 @@ export function queueSessionDelete(sessionId: string) {
     id: makePendingSyncId('remove-session'),
     type: 'removeSession',
     sessionId,
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+  })
+}
+
+export function queueCustomExercisesSave(customExercisesByBodyPart: Record<BodyPart, string[]>) {
+  enqueuePendingSyncOp({
+    id: makePendingSyncId('save-library'),
+    type: 'saveLibrary',
+    customExercisesByBodyPart,
     createdAt: new Date().toISOString(),
     attempts: 0,
   })
@@ -179,8 +222,10 @@ export async function flushPendingSyncOps(
     try {
       if (operation.type === 'saveSession') {
         await saveSession(db, uid, operation.session)
-      } else {
+      } else if (operation.type === 'removeSession') {
         await removeSession(db, uid, operation.sessionId)
+      } else {
+        await saveCustomExercises(db, uid, operation.customExercisesByBodyPart)
       }
       completedCount += 1
     } catch {

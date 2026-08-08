@@ -18,9 +18,12 @@ import { BODY_PARTS } from './data/catalog'
 import { useAtlasStore } from './store/useAtlasStore'
 import {
   queueSessionDelete,
+  queueCustomExercisesSave,
   queueSessionSave,
   removeSession,
   saveSession,
+  saveCustomExercises,
+  subscribeCustomExercises,
   subscribeSessions,
   flushPendingSyncOps,
 } from './lib/firestoreSync'
@@ -941,6 +944,43 @@ function loadCustomExercisesByBodyPart(): Record<BodyPart, string[]> {
   }
 }
 
+function mergeCustomExercisesByBodyPart(
+  localExercises: Record<BodyPart, string[]>,
+  remoteExercises: Record<BodyPart, string[]>,
+) {
+  const merged = createEmptyCustomExercisesByBodyPart()
+  BODY_PARTS.forEach((part) => {
+    merged[part] = Array.from(
+      new Set([...(localExercises[part] ?? []), ...(remoteExercises[part] ?? [])].map((value) => value.trim()).filter(Boolean)),
+    )
+  })
+  return merged
+}
+
+function normalizeCustomExercisesByBodyPart(customExercisesByBodyPart: Record<BodyPart, string[]>) {
+  const normalized = createEmptyCustomExercisesByBodyPart()
+  BODY_PARTS.forEach((part) => {
+    normalized[part] = Array.from(
+      new Set((customExercisesByBodyPart[part] ?? []).map((value) => value.trim()).filter(Boolean)),
+    )
+  })
+  return normalized
+}
+
+function areCustomExercisesEqual(
+  left: Record<BodyPart, string[]>,
+  right: Record<BodyPart, string[]>,
+) {
+  return BODY_PARTS.every((part) => {
+    const leftValues = left[part] ?? []
+    const rightValues = right[part] ?? []
+    if (leftValues.length !== rightValues.length) {
+      return false
+    }
+    return leftValues.every((value, index) => value === rightValues[index])
+  })
+}
+
 function createSession(
   bodyPart: BodyPart,
   exerciseName: string,
@@ -1174,6 +1214,7 @@ function App() {
   const [customExercisesByBodyPart, setCustomExercisesByBodyPart] = useState<
     Record<BodyPart, string[]>
   >(loadCustomExercisesByBodyPart)
+  const [isCustomExercisesHydrated, setIsCustomExercisesHydrated] = useState(false)
   const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>(loadExerciseNotes)
   const [exerciseNoteDraft, setExerciseNoteDraft] = useState('')
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
@@ -1331,6 +1372,51 @@ function App() {
 
     window.localStorage.setItem(CUSTOM_EXERCISES_STORAGE_KEY, JSON.stringify(customExercisesByBodyPart))
   }, [customExercisesByBodyPart])
+
+  useEffect(() => {
+    if (!db || !user || isDemoMode) {
+      setIsCustomExercisesHydrated(true)
+      return
+    }
+
+    const activeDb = db
+    const uid = user.uid
+    setIsCustomExercisesHydrated(false)
+
+    const unsubscribeCustomExercises = subscribeCustomExercises(activeDb, uid, (remoteCustomExercises) => {
+      if (remoteCustomExercises) {
+        setCustomExercisesByBodyPart((current) => {
+          const merged = mergeCustomExercisesByBodyPart(current, normalizeCustomExercisesByBodyPart(remoteCustomExercises))
+          return areCustomExercisesEqual(current, merged) ? current : merged
+        })
+      }
+      setIsCustomExercisesHydrated(true)
+    })
+
+    return () => {
+      unsubscribeCustomExercises()
+    }
+  }, [db, isDemoMode, user])
+
+  useEffect(() => {
+    if (!db || !user || isDemoMode || !isCustomExercisesHydrated) {
+      return
+    }
+
+    const activeDb = db
+    const uid = user.uid
+    const payload = normalizeCustomExercisesByBodyPart(customExercisesByBodyPart)
+
+    void saveCustomExercises(activeDb, uid, payload)
+      .then(() => {
+        setSyncStatus('クラウド同期済み')
+      })
+      .catch(() => {
+        queueCustomExercisesSave(payload)
+        setSyncStatus('同期待機中...')
+        showToast('種目リストの同期に失敗しました。再試行します', 'error')
+      })
+  }, [customExercisesByBodyPart, db, isCustomExercisesHydrated, isDemoMode, user])
 
   useEffect(() => {
     if (!exerciseInfoTarget) {
