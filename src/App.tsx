@@ -30,7 +30,7 @@ import {
   subscribeSessions,
   flushPendingSyncOps,
 } from './lib/firestoreSync'
-import type { BodyPart, ExerciseMetricType, ExerciseSet, MyMenu, WorkoutSession } from './types'
+import type { BodyPart, ExerciseMetricType, ExerciseSet, WorkoutSession } from './types'
 
 type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'settings'
 type MainTab = Exclude<AppTab, 'settings'>
@@ -947,19 +947,6 @@ function loadCustomExercisesByBodyPart(): Record<BodyPart, string[]> {
   }
 }
 
-function mergeCustomExercisesByBodyPart(
-  localExercises: Record<BodyPart, string[]>,
-  remoteExercises: Record<BodyPart, string[]>,
-) {
-  const merged = createEmptyCustomExercisesByBodyPart()
-  BODY_PARTS.forEach((part) => {
-    merged[part] = Array.from(
-      new Set([...(localExercises[part] ?? []), ...(remoteExercises[part] ?? [])].map((value) => value.trim()).filter(Boolean)),
-    )
-  })
-  return merged
-}
-
 function normalizeCustomExercisesByBodyPart(customExercisesByBodyPart: Record<BodyPart, string[]>) {
   const normalized = createEmptyCustomExercisesByBodyPart()
   BODY_PARTS.forEach((part) => {
@@ -968,104 +955,6 @@ function normalizeCustomExercisesByBodyPart(customExercisesByBodyPart: Record<Bo
     )
   })
   return normalized
-}
-
-function areCustomExercisesEqual(
-  left: Record<BodyPart, string[]>,
-  right: Record<BodyPart, string[]>,
-) {
-  return BODY_PARTS.every((part) => {
-    const leftValues = left[part] ?? []
-    const rightValues = right[part] ?? []
-    if (leftValues.length !== rightValues.length) {
-      return false
-    }
-    return leftValues.every((value, index) => value === rightValues[index])
-  })
-}
-
-function areRecordsEqual(left: Record<string, string>, right: Record<string, string>) {
-  const leftKeys = Object.keys(left)
-  const rightKeys = Object.keys(right)
-  if (leftKeys.length !== rightKeys.length) {
-    return false
-  }
-
-  return leftKeys.every((key) => left[key] === right[key])
-}
-
-function areExercisePreferenceMapsEqual(
-  left: Record<string, ExercisePreference>,
-  right: Record<string, ExercisePreference>,
-) {
-  const leftKeys = Object.keys(left)
-  const rightKeys = Object.keys(right)
-  if (leftKeys.length !== rightKeys.length) {
-    return false
-  }
-
-  return leftKeys.every((key) => {
-    const leftValue = left[key]
-    const rightValue = right[key]
-    return (
-      Boolean(rightValue) &&
-      leftValue.restSeconds === rightValue.restSeconds &&
-      leftValue.metricType === rightValue.metricType
-    )
-  })
-}
-
-function areMenusEqual(left: MyMenu[], right: MyMenu[]) {
-  if (left.length !== right.length) {
-    return false
-  }
-
-  return left.every((menu, index) => {
-    const other = right[index]
-    return (
-      other &&
-      menu.id === other.id &&
-      menu.name === other.name &&
-      menu.bodyPart === other.bodyPart &&
-      menu.exercises.length === other.exercises.length &&
-      menu.exercises.every((exercise, exerciseIndex) => exercise === other.exercises[exerciseIndex])
-    )
-  })
-}
-
-function mergeStringRecord(localRecord: Record<string, string>, remoteRecord: Record<string, string>) {
-  return {
-    ...remoteRecord,
-    ...localRecord,
-  }
-}
-
-function mergeExercisePreferenceMaps(
-  localMap: Record<string, ExercisePreference>,
-  remoteMap: Record<string, ExercisePreference>,
-) {
-  return {
-    ...remoteMap,
-    ...localMap,
-  }
-}
-
-function mergeMenus(localMenus: MyMenu[], remoteMenus: MyMenu[]) {
-  const menuMap = new Map<string, MyMenu>()
-  remoteMenus.forEach((menu) => {
-    menuMap.set(menu.id, menu)
-  })
-  localMenus.forEach((menu) => {
-    menuMap.set(menu.id, menu)
-  })
-  return Array.from(menuMap.values())
-}
-
-function normalizeMenus(menus: MyMenu[]) {
-  return menus.map((menu) => ({
-    ...menu,
-    exercises: [...menu.exercises],
-  }))
 }
 
 function createSession(
@@ -1345,6 +1234,8 @@ function App() {
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
   const previousMainTabRef = useRef<MainTab>('home')
   const [phoneConfirmation, setPhoneConfirmation] = useState<ConfirmationResult | null>(null)
+  const lastCustomExercisesSyncRef = useRef<string | null>(null)
+  const lastUserSettingsSyncRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!auth) {
@@ -1473,9 +1364,15 @@ function App() {
 
     const unsubscribeCustomExercises = subscribeCustomExercises(activeDb, uid, (remoteCustomExercises) => {
       if (remoteCustomExercises) {
+        const normalizedRemote = normalizeCustomExercisesByBodyPart(remoteCustomExercises)
         setCustomExercisesByBodyPart((current) => {
-          const merged = mergeCustomExercisesByBodyPart(current, normalizeCustomExercisesByBodyPart(remoteCustomExercises))
-          return areCustomExercisesEqual(current, merged) ? current : merged
+          const currentSignature = JSON.stringify(current)
+          const remoteSignature = JSON.stringify(normalizedRemote)
+          if (currentSignature === remoteSignature) {
+            return current
+          }
+          lastCustomExercisesSyncRef.current = remoteSignature
+          return normalizedRemote
         })
       }
       setIsCustomExercisesHydrated(true)
@@ -1494,9 +1391,15 @@ function App() {
     const activeDb = db
     const uid = user.uid
     const payload = normalizeCustomExercisesByBodyPart(customExercisesByBodyPart)
+    const payloadSignature = JSON.stringify(payload)
+
+    if (lastCustomExercisesSyncRef.current === payloadSignature) {
+      return
+    }
 
     void saveCustomExercises(activeDb, uid, payload)
       .then(() => {
+        lastCustomExercisesSyncRef.current = payloadSignature
         setSyncStatus('クラウド同期済み')
       })
       .catch(() => {
@@ -1518,20 +1421,16 @@ function App() {
 
     const unsubscribeUserSettings = subscribeUserSettings(activeDb, uid, (remoteUserSettings) => {
       if (remoteUserSettings) {
-        setExerciseNotes((current) => {
-          const merged = mergeStringRecord(current, remoteUserSettings.exerciseNotes)
-          return areRecordsEqual(current, merged) ? current : merged
+        setExerciseNotes(remoteUserSettings.exerciseNotes)
+        setExercisePreferences(remoteUserSettings.exercisePreferences)
+        setMyMenus(remoteUserSettings.myMenus)
+        setIsProUnlocked(remoteUserSettings.proUnlocked)
+        lastUserSettingsSyncRef.current = JSON.stringify({
+          exerciseNotes: remoteUserSettings.exerciseNotes,
+          exercisePreferences: remoteUserSettings.exercisePreferences,
+          proUnlocked: remoteUserSettings.proUnlocked,
+          myMenus: remoteUserSettings.myMenus,
         })
-        setExercisePreferences((current) => {
-          const merged = mergeExercisePreferenceMaps(current, remoteUserSettings.exercisePreferences)
-          return areExercisePreferenceMapsEqual(current, merged) ? current : merged
-        })
-        const currentMenus = useAtlasStore.getState().myMenus
-        const mergedMenus = mergeMenus(currentMenus, remoteUserSettings.myMenus)
-        if (!areMenusEqual(currentMenus, mergedMenus)) {
-          setMyMenus(mergedMenus)
-        }
-        setIsProUnlocked((current) => current || remoteUserSettings.proUnlocked)
       }
       setIsUserSettingsHydrated(true)
     })
@@ -1549,14 +1448,20 @@ function App() {
     const activeDb = db
     const uid = user.uid
     const payload = {
-      exerciseNotes: mergeStringRecord({}, exerciseNotes),
-      exercisePreferences: mergeExercisePreferenceMaps({}, exercisePreferences),
+      exerciseNotes,
+      exercisePreferences,
       proUnlocked: isProUnlocked,
-      myMenus: normalizeMenus(myMenus),
+      myMenus,
+    }
+    const payloadSignature = JSON.stringify(payload)
+
+    if (lastUserSettingsSyncRef.current === payloadSignature) {
+      return
     }
 
     void saveUserSettings(activeDb, uid, payload)
       .then(() => {
+        lastUserSettingsSyncRef.current = payloadSignature
         setSyncStatus('クラウド同期済み')
       })
       .catch(() => {
