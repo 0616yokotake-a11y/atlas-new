@@ -1164,6 +1164,7 @@ button.secondary-btn {
   padding-bottom: 4px;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .analytics-panels::-webkit-scrollbar {
@@ -1389,6 +1390,14 @@ button.secondary-btn {
   color: #bae6fd;
   font-size: 0.8rem;
   font-weight: 700;
+}
+
+.analytics-prescription-start-btn {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.74rem;
+  align-self: start;
+  width: fit-content;
 }
 
 .sources-screen-card {
