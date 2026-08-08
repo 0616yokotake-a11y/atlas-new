@@ -1613,11 +1613,10 @@ button.secondary-btn {
 }
 
 .analytics-period-row .chip-button {
-  height: 16px;
-  min-height: 16px;
+  min-height: 28px;
   width: 100%;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 10px;
   border-radius: 999px;
   font-size: 0.72rem;
   line-height: 1;

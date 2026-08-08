@@ -4473,12 +4473,14 @@ function App() {
       const angle = startAngle + angleStep * index
       const valueRadius = analyticsVisualSummary.maxBodyPartLoad > 0 ? axisRadius * (item.load / analyticsVisualSummary.maxBodyPartLoad) : 0
       const valuePoint = pointAt(valueRadius, angle)
+      const vertexPoint = pointAt(axisRadius, angle)
       const labelPoint = pointAt(labelRadius, angle)
       return {
         ...item,
         angle,
         valueRadius,
         valuePoint,
+        vertexPoint,
         labelPoint,
         percent: analyticsVisualSummary.maxBodyPartLoad > 0 ? Math.round((item.load / analyticsVisualSummary.maxBodyPartLoad) * 100) : 0,
       }
@@ -6417,11 +6419,11 @@ function App() {
                             </text>
                             <text
                               className="analytics-radar-value"
-                              x={item.valuePoint.x}
-                              y={item.valuePoint.y}
+                              x={item.vertexPoint.x}
+                              y={item.vertexPoint.y}
                               textAnchor="middle"
                             >
-                              <tspan x={item.valuePoint.x} dy="-0.2em">{item.load.toLocaleString()}pt</tspan>
+                              <tspan x={item.vertexPoint.x} dy="-0.2em">{item.load.toLocaleString()}pt</tspan>
                             </text>
                           </g>
                         ))}
