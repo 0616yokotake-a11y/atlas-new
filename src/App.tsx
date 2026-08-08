@@ -4454,8 +4454,8 @@ function App() {
   const analyticsRadarChart = useMemo(() => {
     const center = 120
     const axisRadius = 82
-    const valueLabelRadius = axisRadius + 22
-    const labelRadius = axisRadius + 58
+    const valueLabelRadius = axisRadius + 14
+    const labelRadius = axisRadius + 30
     const ringFractions = [0.34, 0.67, 1]
     const angleStep = (Math.PI * 2) / BODY_PARTS.length
     const startAngle = -Math.PI / 2
@@ -6399,8 +6399,8 @@ function App() {
                             className="analytics-radar-axis"
                             x1="120"
                             y1="120"
-                            x2={item.labelPoint.x}
-                            y2={item.labelPoint.y}
+                            x2={item.vertexPoint.x}
+                            y2={item.vertexPoint.y}
                           />
                         ))}
                         <polygon className="analytics-radar-fill" points={analyticsRadarChart.polygonPoints} />
