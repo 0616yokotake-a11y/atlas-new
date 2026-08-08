@@ -12,6 +12,8 @@ import type { BodyPart, ExerciseMetricType, MyMenu, WorkoutSession } from '../ty
 const PENDING_SYNC_STORAGE_KEY = 'atlas.pending-sync-ops.v1'
 const MAX_PENDING_SYNC_ATTEMPTS = 8
 
+export type TrainingGoal = '筋肥大' | 'ダイエット'
+
 type PendingSyncOperation =
   | {
       id: string
@@ -51,7 +53,18 @@ export type UserSettingsPayload = {
   exerciseNotes: Record<string, string>
   exercisePreferences: Record<string, { restSeconds: number; metricType?: ExerciseMetricType }>
   proUnlocked: boolean
+  trainingGoal: TrainingGoal
   myMenus: MyMenu[]
+  pickerStepSettings: {
+    weightStep: number
+    repStep: number
+    durationStep: number
+  }
+  bodyProfile: {
+    heightCm: number | null
+    weightKg: number | null
+    age: number | null
+  }
 }
 
 function readPendingSyncOps(): PendingSyncOperation[] {
@@ -74,6 +87,28 @@ function readPendingSyncOps(): PendingSyncOperation[] {
   } catch {
     return []
   }
+}
+
+function readLatestPendingSaveUserSettings(): UserSettingsPayload | null {
+  const pendingOps = readPendingSyncOps()
+  for (let index = pendingOps.length - 1; index >= 0; index -= 1) {
+    const op = pendingOps[index]
+    if (op.type === 'saveUserSettings') {
+      return op.userSettings
+    }
+  }
+  return null
+}
+
+function readLatestPendingSaveCustomExercises(): Record<BodyPart, string[]> | null {
+  const pendingOps = readPendingSyncOps()
+  for (let index = pendingOps.length - 1; index >= 0; index -= 1) {
+    const op = pendingOps[index]
+    if (op.type === 'saveLibrary') {
+      return op.customExercisesByBodyPart
+    }
+  }
+  return null
 }
 
 function writePendingSyncOps(operations: PendingSyncOperation[]) {
@@ -101,7 +136,16 @@ function enqueuePendingSyncOp(operation: PendingSyncOperation) {
     if (item.type === 'removeSession' && operation.type === 'removeSession') {
       return item.sessionId !== operation.sessionId
     }
+    if (item.type === 'saveSession' && operation.type === 'removeSession') {
+      return item.session.id !== operation.sessionId
+    }
+    if (item.type === 'removeSession' && operation.type === 'saveSession') {
+      return item.sessionId !== operation.session.id
+    }
     if (item.type === 'saveLibrary' && operation.type === 'saveLibrary') {
+      return false
+    }
+    if (item.type === 'saveUserSettings' && operation.type === 'saveUserSettings') {
       return false
     }
     return true
@@ -200,7 +244,18 @@ export function subscribeUserSettings(
       exerciseNotes: data.exerciseNotes ?? {},
       exercisePreferences: data.exercisePreferences ?? {},
       proUnlocked: Boolean(data.proUnlocked),
+      trainingGoal: data.trainingGoal === 'ダイエット' ? 'ダイエット' : '筋肥大',
       myMenus: Array.isArray(data.myMenus) ? data.myMenus : [],
+      pickerStepSettings: data.pickerStepSettings ?? {
+        weightStep: 1,
+        repStep: 1,
+        durationStep: 5,
+      },
+      bodyProfile: data.bodyProfile ?? {
+        heightCm: null,
+        weightKg: null,
+        age: null,
+      },
     })
   })
 }
@@ -239,6 +294,10 @@ export function queueCustomExercisesSave(customExercisesByBodyPart: Record<BodyP
   })
 }
 
+export function getPendingCustomExercisesSavePayload() {
+  return readLatestPendingSaveCustomExercises()
+}
+
 export function queueUserSettingsSave(userSettings: UserSettingsPayload) {
   enqueuePendingSyncOp({
     id: makePendingSyncId('save-user-settings'),
@@ -247,6 +306,35 @@ export function queueUserSettingsSave(userSettings: UserSettingsPayload) {
     createdAt: new Date().toISOString(),
     attempts: 0,
   })
+}
+
+export function getPendingUserSettingsSavePayload() {
+  return readLatestPendingSaveUserSettings()
+}
+
+export function getPendingSessionSyncState() {
+  const pending = readPendingSyncOps()
+  const savingIds = new Set<string>()
+  const deletingIds = new Set<string>()
+
+  pending.forEach((operation) => {
+    if (operation.type === 'saveSession') {
+      savingIds.add(operation.session.id)
+    }
+    if (operation.type === 'removeSession') {
+      deletingIds.add(operation.sessionId)
+    }
+  })
+
+  return { savingIds, deletingIds }
+}
+
+export function hasPendingCustomExercisesSave() {
+  return readPendingSyncOps().some((operation) => operation.type === 'saveLibrary')
+}
+
+export function hasPendingUserSettingsSave() {
+  return readPendingSyncOps().some((operation) => operation.type === 'saveUserSettings')
 }
 
 export async function flushPendingSyncOps(

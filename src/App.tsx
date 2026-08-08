@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   GoogleAuthProvider,
   RecaptchaVerifier,
@@ -13,7 +13,7 @@ import {
   type User,
 } from 'firebase/auth'
 import dayjs from 'dayjs'
-import { auth, db, isFirebaseConfigured } from './lib/firebase'
+import { auth, db } from './lib/firebase'
 import { BODY_PARTS } from './data/catalog'
 import { useAtlasStore } from './store/useAtlasStore'
 import {
@@ -21,6 +21,9 @@ import {
   queueCustomExercisesSave,
   queueUserSettingsSave,
   queueSessionSave,
+  getPendingSessionSyncState,
+  getPendingCustomExercisesSavePayload,
+  getPendingUserSettingsSavePayload,
   removeSession,
   saveSession,
   saveCustomExercises,
@@ -29,11 +32,14 @@ import {
   subscribeUserSettings,
   subscribeSessions,
   flushPendingSyncOps,
+  type TrainingGoal,
+  type UserSettingsPayload,
 } from './lib/firestoreSync'
 import type { BodyPart, ExerciseMetricType, ExerciseSet, WorkoutSession } from './types'
 
-type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'settings'
+type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'sources' | 'settings'
 type MainTab = Exclude<AppTab, 'settings'>
+type AnalyticsPanel = 'overview' | 'decision' | 'action'
 type AuthMode = 'login' | 'signup' | 'reset'
 type WorkoutPhase = 'body' | 'exercise' | 'record'
 type PickerTargetKey = 'weight' | 'reps' | 'duration'
@@ -42,6 +48,17 @@ type ExercisePreference = {
   restSeconds: number
   metricType?: ExerciseMetricType
 }
+type PickerStepSettings = {
+  weightStep: number
+  repStep: number
+  durationStep: number
+}
+type BodyProfile = {
+  heightCm: number | null
+  weightKg: number | null
+  age: number | null
+}
+type UserSettingsSnapshot = UserSettingsPayload
 type ExerciseGuidanceSpec = {
   setup: string
   cue: string
@@ -68,13 +85,157 @@ type RepresentativeExercise = {
   name: string
   metricType: ExerciseMetricType
 }
+type AnalyticsEvidenceSource = {
+  title: string
+  takeaway: string
+  url: string
+}
+type LiteratureArticle = {
+  pmid: string
+  title: string
+  journal: string
+  pubDate: string
+  url: string
+  snippet: string
+}
+type LiteratureSection = {
+  title: string
+  query: string
+  articles: LiteratureArticle[]
+}
 const WHEEL_ITEM_HEIGHT = 54
 const WHEEL_VISIBLE_ROWS = 5
 const WHEEL_SIDE_PADDING = ((WHEEL_VISIBLE_ROWS - 1) / 2) * WHEEL_ITEM_HEIGHT
 const EXERCISE_PREFERENCES_STORAGE_KEY = 'atlas.exercise-preferences.v1'
 const EXERCISE_NOTES_STORAGE_KEY = 'atlas.exercise-notes.v1'
 const CUSTOM_EXERCISES_STORAGE_KEY = 'atlas.custom-exercises.v1'
+const CUSTOM_EXERCISES_SYNC_STORAGE_KEY = 'atlas.custom-exercises.sync.v1'
+const USER_SETTINGS_SYNC_STORAGE_KEY = 'atlas.user-settings.sync.v1'
+const PICKER_STEP_SETTINGS_STORAGE_KEY = 'atlas.picker-step-settings.v1'
+const BODY_PROFILE_STORAGE_KEY = 'atlas.body-profile.v1'
+const PICKER_KEYPAD_SEEN_STORAGE_KEY = 'atlas.picker-keypad-seen.v1'
 const PRO_UNLOCKED_STORAGE_KEY = 'atlas.pro-unlocked.v1'
+const TRAINING_GOAL_STORAGE_KEY = 'atlas.training-goal.v1'
+const DEFAULT_TRAINING_GOAL: TrainingGoal = '筋肥大'
+const ANALYTICS_PANEL_TITLES: Record<AnalyticsPanel, string> = {
+  overview: '概況',
+  decision: '判断',
+  action: '次回アクション',
+}
+const ANALYTICS_EVIDENCE_SOURCES: AnalyticsEvidenceSource[] = [
+  {
+    title: 'ACSM Progression Models in Resistance Training for Healthy Adults',
+    takeaway: '主要部位は週2〜3回、1〜12RMを周期的に使い分け、複合種目では長めの休憩と段階的な負荷更新を推奨。',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/11828249/',
+  },
+  {
+    title: 'Resistance Training Volume Enhances Muscle Hypertrophy but Not Strength in Trained Men',
+    takeaway: '筋肥大は週セット数に対して段階的に伸びる。1セット増やすだけでも上積みの余地がある。',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/30153194/',
+  },
+  {
+    title: 'Effects of Resistance Training Frequency on Measures of Muscle Hypertrophy',
+    takeaway: 'ボリュームをそろえた条件では、主要筋群を週2回以上にする発想が有利。',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/27102172/',
+  },
+  {
+    title: 'Volume Load Rather Than Resting Interval Influences Muscle Hypertrophy',
+    takeaway: '短い休憩そのものより、総負荷を落とさないことが筋肥大では重要。',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/35622106/',
+  },
+  {
+    title: 'Tempo and Muscle Hypertrophy Meta-analysis',
+    takeaway: '通常テンポは広く許容されるが、極端に遅すぎる反復は不利。',
+    url: 'https://pubmed.ncbi.nlm.nih.gov/25601394/',
+  },
+]
+const DEFAULT_PICKER_STEP_SETTINGS: PickerStepSettings = {
+  weightStep: 2.5,
+  repStep: 1,
+  durationStep: 5,
+}
+const DEFAULT_BODY_PROFILE: BodyProfile = {
+  heightCm: null,
+  weightKg: null,
+  age: null,
+}
+const TIME_BASED_EXERCISES = new Set([
+  'プランク',
+  'サイドプランク',
+])
+
+function isTimeBasedExercise(exerciseName: string): boolean {
+  return TIME_BASED_EXERCISES.has(exerciseName)
+}
+
+function getBodyProfileInsight(profile: BodyProfile) {
+  const hasHeight = typeof profile.heightCm === 'number' && profile.heightCm > 0
+  const hasWeight = typeof profile.weightKg === 'number' && profile.weightKg > 0
+  const hasAge = typeof profile.age === 'number' && profile.age > 0
+  const heightCm = profile.heightCm ?? 0
+  const weightKg = profile.weightKg ?? 0
+  const bmi = hasHeight && hasWeight ? weightKg / ((heightCm / 100) ** 2) : null
+
+  let bmiLabel = '未設定'
+  if (bmi !== null) {
+    if (bmi < 18.5) {
+      bmiLabel = 'やや軽め'
+    } else if (bmi < 25) {
+      bmiLabel = '標準'
+    } else if (bmi < 30) {
+      bmiLabel = 'がっしり'
+    } else {
+      bmiLabel = '高め'
+    }
+  }
+
+  const trainingHint =
+    bmi === null
+      ? '身長と体重を入れると、負荷の置き方をもう少し自分向けにできます。'
+      : bmi < 18.5
+        ? '軽めの体格なので、フォーム安定と栄養確保を優先しつつ伸ばすのが良さそうです。'
+        : bmi < 25
+          ? '標準域です。今の頻度を軸に、重量か回数を少しずつ伸ばすのが合っています。'
+          : bmi < 30
+            ? 'やや負荷高めでも進めやすい体格です。セット密度を上げて効率よく積み上げられます。'
+            : '関節負担に配慮しつつ、回数と可動域の質を優先すると安定しやすいです。'
+
+  const nutritionHint =
+    hasWeight
+      ? `たんぱく質は目安で ${Math.round(weightKg * 1.6)}〜${Math.round(weightKg * 2.2)}g/日。`
+      : '体重が入ると、栄養目安も自分向けに出せます。'
+
+  const recoveryHint =
+    hasAge && profile.age !== null && profile.age >= 40
+      ? '回復は少し長めに見て、休養日を丁寧に確保すると安定します。'
+      : '回復は現状の頻度を基準に、疲労感が強い日は1段階軽くするのが無難です。'
+
+  const homeHint =
+    bmi === null
+      ? '体格を入れると分析が育つよ。'
+      : bmi < 18.5
+        ? 'フォームと栄養を丁寧に。'
+        : bmi < 25
+          ? '今の頻度で少しずつ更新。'
+          : bmi < 30
+            ? '密度を上げて効率よく。'
+            : '回数と可動域の質を優先。'
+
+  return {
+    bmi,
+    bmiLabel,
+    title: hasHeight || hasWeight || hasAge ? `${profile.heightCm ?? '--'}cm / ${profile.weightKg ?? '--'}kg / ${profile.age ?? '--'}歳` : '未設定',
+    detail:
+      bmi !== null
+        ? `BMI ${bmi.toFixed(1)}（${bmiLabel}）。${hasWeight ? `体重${profile.weightKg}kgで消費カロリーも反映中。` : ''}`
+        : '身長と体重を入れると、分析がもう一段あなた寄りになります。',
+    trainingHint,
+    nutritionHint,
+    recoveryHint,
+    homeHint,
+  }
+}
+
 const REPRESENTATIVE_EXERCISES_BY_BODY_PART: Record<BodyPart, RepresentativeExercise[]> = {
   胸: [
     { name: 'ベンチプレス', metricType: 'reps' },
@@ -173,14 +334,69 @@ function playTimerEndSound() {
   }
 }
 
-function mergeWorkoutSessions(localSessions: WorkoutSession[], remoteSessions: WorkoutSession[]) {
-  const remoteIds = new Set(remoteSessions.map((session) => session.id))
-  const merged = [
-    ...remoteSessions,
-    ...localSessions.filter((session) => !remoteIds.has(session.id)),
-  ]
+function mergeWorkoutSessions(
+  localSessions: WorkoutSession[],
+  remoteSessions: WorkoutSession[],
+  pendingState?: { savingIds: Set<string>; deletingIds: Set<string> },
+) {
+  const remoteMap = new Map<string, WorkoutSession>()
+  remoteSessions.forEach((session) => {
+    if (pendingState?.deletingIds.has(session.id)) {
+      return
+    }
+    remoteMap.set(session.id, session)
+  })
 
-  return merged.sort((left, right) => dayjs(right.date).valueOf() - dayjs(left.date).valueOf())
+  localSessions.forEach((session) => {
+    if (pendingState?.deletingIds.has(session.id)) {
+      remoteMap.delete(session.id)
+      return
+    }
+
+    if (pendingState?.savingIds.has(session.id) || !remoteMap.has(session.id)) {
+      remoteMap.set(session.id, session)
+    }
+  })
+
+  return Array.from(remoteMap.values()).sort((left, right) => dayjs(right.date).valueOf() - dayjs(left.date).valueOf())
+}
+
+function getRestTimerPanelLayout(
+  floatingRect: DOMRect,
+  panelRect: DOMRect | null,
+  parentRect: DOMRect,
+  viewportWidth: number,
+  viewportHeight: number,
+): { style: CSSProperties } {
+  const gap = 8
+  const margin = 8
+  const maxWidth = Math.min(300, Math.max(240, viewportWidth - margin * 2))
+  const maxHeight = Math.min(320, Math.max(120, viewportHeight - margin * 2))
+  const panelWidth = Math.min(panelRect?.width ?? maxWidth, maxWidth)
+  const panelHeight = Math.min(panelRect?.height ?? 144, maxHeight)
+
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+  const goBelow = viewportHeight - floatingRect.bottom >= floatingRect.top
+  const goRight = viewportWidth - floatingRect.right >= floatingRect.left
+
+  let top = goBelow ? floatingRect.bottom + gap : floatingRect.top - gap - panelHeight
+  let left = goRight ? floatingRect.left : floatingRect.right - panelWidth
+
+  const safeLeft = clamp(left, margin, Math.max(margin, viewportWidth - margin - panelWidth))
+  const safeTop = clamp(top, margin, Math.max(margin, viewportHeight - margin - panelHeight))
+
+  return {
+    style: {
+      position: 'absolute',
+      top: `${safeTop - parentRect.top}px`,
+      left: `${safeLeft - parentRect.left}px`,
+      width: `${panelWidth}px`,
+      maxWidth: `${maxWidth}px`,
+      maxHeight: `${panelHeight}px`,
+      visibility: 'visible',
+    },
+  }
 }
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -221,7 +437,7 @@ function getDefaultExerciseMetricType(exerciseName: string): ExerciseMetricType 
     }
   }
 
-  return exerciseName === 'プランク' || exerciseName === 'サイドプランク' ? 'time' : 'reps'
+  return TIME_BASED_EXERCISES.has(exerciseName) ? 'time' : 'reps'
 }
 
 function getSetMetricValue(set: Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>, metricType: ExerciseMetricType): number {
@@ -257,6 +473,299 @@ function formatSetLabel(set: Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'
     return `${set.weight}kg×${metricValue}${metricUnit}`
   }
   return `${metricValue}${metricUnit}`
+}
+
+function roundToStep(value: number, step: number) {
+  if (!step || step <= 0) {
+    return value
+  }
+  return Math.round(value / step) * step
+}
+
+function getGoalPlan(goal: TrainingGoal) {
+  if (goal === 'ダイエット') {
+    return {
+      frequencyLabel: '週2回前後',
+      setBandLabel: '週6〜10セット',
+      restLabel: '60〜120秒',
+      progressionLabel: '重量維持→回数維持→セット微調整',
+      compoundRestLabel: '90〜150秒',
+      isolationRestLabel: '45〜90秒',
+      summary: '減量中は重量を守って筋量を維持し、ボリュームはやや控えめに整理する。',
+    }
+  }
+
+  return {
+    frequencyLabel: '週2〜3回',
+    setBandLabel: '週10〜15セット',
+    restLabel: '90〜180秒',
+    progressionLabel: '回数+1→重量+1段階→セット追加',
+    compoundRestLabel: '120〜180秒',
+    isolationRestLabel: '60〜90秒',
+    summary: '筋肥大は頻度とセット数を確保し、回数が伸びたら重量更新へ進める。',
+  }
+}
+
+function getBodyProfileTrainingProfile(profile: BodyProfile) {
+  const bmi = profile.heightCm && profile.weightKg ? profile.weightKg / ((profile.heightCm / 100) ** 2) : null
+
+  if (bmi === null) {
+    return {
+      bmi,
+      label: '未設定',
+      setDelta: 0,
+      restDelta: 0,
+      note: '体格プロフィールを入れると、ボリュームと休憩の解像度が上がる。',
+    }
+  }
+
+  if (bmi < 18.5) {
+    return {
+      bmi,
+      label: 'やや軽め',
+      setDelta: 1,
+      restDelta: 30,
+      note: '体重維持と回復を優先し、無理に絞らず伸ばす。',
+    }
+  }
+
+  if (bmi < 25) {
+    return {
+      bmi,
+      label: '標準',
+      setDelta: 0,
+      restDelta: 0,
+      note: '今の配分を土台に、目的に応じて微調整する。',
+    }
+  }
+
+  if (bmi < 30) {
+    return {
+      bmi,
+      label: 'やや高め',
+      setDelta: -1,
+      restDelta: 0,
+      note: '密度重視で進めやすい。セットは少し絞って継続性を優先。',
+    }
+  }
+
+  return {
+    bmi,
+    label: '高め',
+    setDelta: -1,
+    restDelta: 15,
+    note: '関節負担に配慮しつつ、休憩と可動域の質を優先。',
+  }
+}
+
+function getBodyGoalAlignment(profile: BodyProfile, goal: TrainingGoal) {
+  const bodyProfilePlan = getBodyProfileTrainingProfile(profile)
+
+  if (bodyProfilePlan.bmi === null) {
+    return {
+      title: '体格プロフィール未設定',
+      detail: '身長と体重を入れると、目的との相性まで自動で詰められる。',
+    }
+  }
+
+  const bmiText = `BMI ${bodyProfilePlan.bmi.toFixed(1)}`
+
+  if (goal === 'ダイエット') {
+    if (bodyProfilePlan.bmi < 18.5) {
+      return {
+        title: `${bmiText} / 体重維持優先`,
+        detail: '減量は強めに攻めすぎず、筋量維持と回復を先に守るのが合っている。',
+      }
+    }
+
+    if (bodyProfilePlan.bmi < 25) {
+      return {
+        title: `${bmiText} / バランス型`,
+        detail: '今の配分を崩しすぎず、重量維持とセット密度の調整で進めるのが噛み合う。',
+      }
+    }
+
+    if (bodyProfilePlan.bmi < 30) {
+      return {
+        title: `${bmiText} / 密度重視`,
+        detail: '減量と相性がよい。セットを絞りすぎず、休憩短めでテンポよく進めるのが良い。',
+      }
+    }
+
+    return {
+      title: `${bmiText} / 回復重視`,
+      detail: '関節負担を抑えつつ、可動域と休憩の質を優先すると安定しやすい。',
+    }
+  }
+
+  if (bodyProfilePlan.bmi < 18.5) {
+    return {
+      title: `${bmiText} / 増量優先`,
+      detail: '筋肥大ではボリュームを少し厚めにして、回復と栄養を確保すると伸びやすい。',
+    }
+  }
+
+  if (bodyProfilePlan.bmi < 25) {
+    return {
+      title: `${bmiText} / 王道ゾーン`,
+      detail: '筋肥大の土台に合う。頻度と週セット数をしっかり確保して積み上げやすい。',
+    }
+  }
+
+  if (bodyProfilePlan.bmi < 30) {
+    return {
+      title: `${bmiText} / 密度寄り`,
+      detail: '重量を保ちつつ、セット構成は少し締めると継続しやすい。',
+    }
+  }
+
+  return {
+    title: `${bmiText} / 関節配慮`,
+    detail: '無理にボリュームを上げすぎず、回数とフォームを丁寧に伸ばすのが合っている。',
+  }
+}
+
+function getAnchorExercise(session: WorkoutSession) {
+  const exercise = [...session.exercises].sort((left, right) => {
+    const leftMetricType = resolveExerciseMetricType(left)
+    const rightMetricType = resolveExerciseMetricType(right)
+    const leftVolume = left.sets.reduce((sum, set) => sum + getExerciseSetVolume(set, leftMetricType), 0)
+    const rightVolume = right.sets.reduce((sum, set) => sum + getExerciseSetVolume(set, rightMetricType), 0)
+    return rightVolume - leftVolume
+  })[0]
+
+  return exercise ?? session.exercises[0] ?? null
+}
+
+function getNextBodyPartPrescription(
+  part: BodyPart,
+  sessions: WorkoutSession[],
+  goal: TrainingGoal,
+  stepSettings: PickerStepSettings,
+  bodyProfile: BodyProfile,
+): {
+  part: BodyPart
+  exerciseName: string
+  weight: number
+  reps: number
+  sets: number
+  restSeconds: number
+  detail: string
+} {
+  const sortedSessions = [...sessions]
+    .filter((session) => session.bodyPart === part)
+    .sort((left, right) => dayjs(right.date).valueOf() - dayjs(left.date).valueOf())
+  const latestSession = sortedSessions[0]
+  const goalPlan = getGoalPlan(goal)
+  const bodyProfilePlan = getBodyProfileTrainingProfile(bodyProfile)
+
+  if (!latestSession) {
+    const representative = REPRESENTATIVE_EXERCISES_BY_BODY_PART[part][0]
+    const inputProfile = getExerciseInputProfile(representative.name)
+    return {
+      part,
+      exerciseName: representative.name,
+      weight: roundToStep(inputProfile.defaultWeight, stepSettings.weightStep),
+      reps: inputProfile.defaultReps,
+      sets: Math.max(2, 3 + bodyProfilePlan.setDelta),
+      restSeconds: Math.max(60, inputProfile.defaultRestSeconds + bodyProfilePlan.restDelta),
+      detail: `${goalPlan.summary} ${bodyProfilePlan.note} まずは基準を作るために代表種目から開始。`,
+    }
+  }
+
+  const anchorExercise = getAnchorExercise(latestSession)
+  if (!anchorExercise) {
+    const representative = REPRESENTATIVE_EXERCISES_BY_BODY_PART[part][0]
+    const inputProfile = getExerciseInputProfile(representative.name)
+    return {
+      part,
+      exerciseName: representative.name,
+      weight: roundToStep(inputProfile.defaultWeight, stepSettings.weightStep),
+      reps: inputProfile.defaultReps,
+      sets: Math.max(2, 3 + bodyProfilePlan.setDelta),
+      restSeconds: Math.max(60, inputProfile.defaultRestSeconds + bodyProfilePlan.restDelta),
+      detail: `${bodyProfilePlan.note} 記録が薄いので、まずは代表種目の基準値を使う。`,
+    }
+  }
+
+  const metricType = resolveExerciseMetricType(anchorExercise)
+  const inputProfile = getExerciseInputProfile(anchorExercise.name)
+  const bestSet = anchorExercise.sets.reduce((best, set) => {
+    if (set.weight > best.weight) {
+      return set
+    }
+    if (set.weight === best.weight && getSetMetricValue(set, metricType) > getSetMetricValue(best, metricType)) {
+      return set
+    }
+    return best
+  }, anchorExercise.sets[0] ?? createSet(0))
+
+  const latestSetCount = Math.max(1, anchorExercise.sets.length)
+  const latestMetric = Math.max(1, getSetMetricValue(bestSet, metricType))
+  const currentWeight = bestSet.weight > 0 ? bestSet.weight : inputProfile.defaultWeight
+  const currentSets = Math.max(1, latestSetCount)
+
+  let nextWeight = currentWeight
+  let nextReps = latestMetric
+  let nextSets = currentSets
+  let restSeconds = goal === 'ダイエット' ? 90 : 120
+  const setFloor = goal === 'ダイエット' ? 2 : 3
+  const setCeiling = goal === 'ダイエット' ? 4 : 5
+  const adjustedDefaultSets = Math.max(setFloor, Math.min(setCeiling, currentSets + bodyProfilePlan.setDelta))
+  const restOffset = bodyProfilePlan.restDelta
+
+  if (metricType === 'time') {
+    const nextDuration = goal === 'ダイエット'
+      ? Math.max(inputProfile.defaultDurationSec, latestMetric)
+      : Math.min(inputProfile.durationMax, latestMetric + stepSettings.durationStep)
+    nextReps = nextDuration
+    nextSets = Math.max(setFloor, Math.min(setCeiling, goal === 'ダイエット' ? currentSets : currentSets + bodyProfilePlan.setDelta))
+    restSeconds = Math.max(60, (goal === 'ダイエット' ? 75 : 90) + restOffset)
+    return {
+      part,
+      exerciseName: anchorExercise.name,
+      weight: roundToStep(currentWeight, stepSettings.weightStep),
+      reps: nextReps,
+      sets: nextSets,
+      restSeconds,
+      detail:
+        goal === 'ダイエット'
+          ? `${goalPlan.summary} ${bodyProfilePlan.note} 同じ秒数を安定して押さえつつ、休憩を短めに整える。`
+          : `${goalPlan.summary} ${bodyProfilePlan.note} まずは秒数を少し伸ばしてから負荷更新へ。`,
+    }
+  }
+
+  if (goal === 'ダイエット') {
+    nextWeight = roundToStep(currentWeight, stepSettings.weightStep)
+    nextReps = Math.max(inputProfile.repMin, Math.min(inputProfile.repMax, latestMetric))
+    nextSets = adjustedDefaultSets
+    restSeconds = Math.max(60, 90 + restOffset)
+  } else if (latestMetric >= Math.min(inputProfile.repMax, 10)) {
+    nextWeight = roundToStep(currentWeight + stepSettings.weightStep, stepSettings.weightStep)
+    nextReps = Math.max(inputProfile.repMin, Math.min(inputProfile.repMax, latestMetric - stepSettings.repStep))
+    nextSets = Math.min(setCeiling, currentSets + 1 + bodyProfilePlan.setDelta)
+    restSeconds = Math.max(90, inputProfile.defaultRestSeconds + restOffset)
+  } else {
+    nextWeight = roundToStep(currentWeight, stepSettings.weightStep)
+    nextReps = Math.max(inputProfile.repMin, Math.min(inputProfile.repMax, latestMetric + stepSettings.repStep))
+    nextSets = Math.min(setCeiling, currentSets + (currentSets < 4 ? 1 : 0) + bodyProfilePlan.setDelta)
+    restSeconds = Math.max(90, inputProfile.defaultRestSeconds + restOffset)
+  }
+
+  return {
+    part,
+    exerciseName: anchorExercise.name,
+    weight: nextWeight,
+    reps: nextReps,
+    sets: nextSets,
+    restSeconds,
+    detail:
+      goal === 'ダイエット'
+        ? `${goalPlan.summary} ${bodyProfilePlan.label}の体格では、重量は維持・回数は安定・セットはやりすぎない。`
+        : latestMetric >= Math.min(inputProfile.repMax, 10)
+          ? `${bodyProfilePlan.label}の体格では回数の余裕が出たら重量更新。セットも1つ追加して伸びを作る。`
+          : `${bodyProfilePlan.label}の体格では、まず回数を押し上げてから重量更新へ進む。`,
+  }
 }
 
 const EXERCISE_INFO: Record<string, string> = {
@@ -726,6 +1235,8 @@ function getNearestOption(options: number[], value: number): number {
 }
 
 function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
+  const isTimeBased = isTimeBasedExercise(exerciseName)
+
   if (
     [
       'ベンチプレス',
@@ -744,8 +1255,8 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
   ) {
     return {
       defaultWeight: 60,
-      defaultReps: 8,
-      defaultDurationSec: 60,
+      defaultReps: isTimeBased ? 1 : 8,
+      defaultDurationSec: isTimeBased ? 45 : 60,
       defaultRestSeconds: 150,
       weightMin: 0,
       weightMax: 300,
@@ -855,8 +1366,8 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
   ) {
     return {
       defaultWeight: 0,
-      defaultReps: ['プランク', 'サイドプランク'].includes(exerciseName) ? 1 : 12,
-      defaultDurationSec: ['プランク', 'サイドプランク'].includes(exerciseName) ? 45 : 60,
+      defaultReps: isTimeBased ? 1 : 12,
+      defaultDurationSec: isTimeBased ? 45 : 60,
       defaultRestSeconds: 60,
       weightMin: 0,
       weightMax: 40,
@@ -887,15 +1398,131 @@ function getExerciseInputProfile(exerciseName: string): ExerciseInputProfile {
   }
 }
 
-function getPickerOptionsForExercise(exerciseName: string, key: PickerTargetKey): number[] {
+function getPickerOptionsForExercise(
+  exerciseName: string,
+  key: PickerTargetKey,
+  stepSettings: PickerStepSettings,
+): number[] {
   const profile = getExerciseInputProfile(exerciseName)
   if (key === 'weight') {
-    return buildNumberOptions(profile.weightMin, profile.weightMax, profile.weightStep)
+    return buildNumberOptions(profile.weightMin, profile.weightMax, stepSettings.weightStep)
   }
   if (key === 'duration') {
-    return buildNumberOptions(profile.durationMin, profile.durationMax, profile.durationStep)
+    return buildNumberOptions(profile.durationMin, profile.durationMax, stepSettings.durationStep)
   }
-  return buildNumberOptions(profile.repMin, profile.repMax, profile.repStep)
+  return buildNumberOptions(profile.repMin, profile.repMax, stepSettings.repStep)
+}
+
+function loadPickerStepSettings(): PickerStepSettings {
+  if (typeof window === 'undefined') {
+    return DEFAULT_PICKER_STEP_SETTINGS
+  }
+
+  const raw = window.localStorage.getItem(PICKER_STEP_SETTINGS_STORAGE_KEY)
+  if (!raw) {
+    return DEFAULT_PICKER_STEP_SETTINGS
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<PickerStepSettings>
+    return {
+      weightStep: typeof parsed.weightStep === 'number' && parsed.weightStep > 0 ? parsed.weightStep : DEFAULT_PICKER_STEP_SETTINGS.weightStep,
+      repStep: typeof parsed.repStep === 'number' && parsed.repStep > 0 ? parsed.repStep : DEFAULT_PICKER_STEP_SETTINGS.repStep,
+      durationStep: typeof parsed.durationStep === 'number' && parsed.durationStep > 0 ? parsed.durationStep : DEFAULT_PICKER_STEP_SETTINGS.durationStep,
+    }
+  } catch (error) {
+    console.error('Failed to load picker step settings', error)
+    window.localStorage.removeItem(PICKER_STEP_SETTINGS_STORAGE_KEY)
+    return DEFAULT_PICKER_STEP_SETTINGS
+  }
+}
+
+function loadBodyProfile(): BodyProfile {
+  if (typeof window === 'undefined') {
+    return DEFAULT_BODY_PROFILE
+  }
+
+  const raw = window.localStorage.getItem(BODY_PROFILE_STORAGE_KEY)
+  if (!raw) {
+    return DEFAULT_BODY_PROFILE
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<BodyProfile>
+    return {
+      heightCm: typeof parsed.heightCm === 'number' && parsed.heightCm > 0 ? parsed.heightCm : null,
+      weightKg: typeof parsed.weightKg === 'number' && parsed.weightKg > 0 ? parsed.weightKg : null,
+      age: typeof parsed.age === 'number' && parsed.age > 0 ? parsed.age : null,
+    }
+  } catch (error) {
+    console.error('Failed to load body profile', error)
+    window.localStorage.removeItem(BODY_PROFILE_STORAGE_KEY)
+    return DEFAULT_BODY_PROFILE
+  }
+}
+
+function normalizeTrainingGoal(goal: string | null | undefined): TrainingGoal {
+  return goal === 'ダイエット' ? 'ダイエット' : DEFAULT_TRAINING_GOAL
+}
+
+function loadTrainingGoal(): TrainingGoal {
+  if (typeof window === 'undefined') {
+    return DEFAULT_TRAINING_GOAL
+  }
+
+  return normalizeTrainingGoal(window.localStorage.getItem(TRAINING_GOAL_STORAGE_KEY))
+}
+
+function saveTrainingGoal(goal: TrainingGoal) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(TRAINING_GOAL_STORAGE_KEY, goal)
+}
+
+function loadUserSettingsSyncSnapshot(): UserSettingsSnapshot | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const raw = window.localStorage.getItem(USER_SETTINGS_SYNC_STORAGE_KEY)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<UserSettingsSnapshot>
+    return {
+      exerciseNotes: parsed.exerciseNotes ?? {},
+      exercisePreferences: parsed.exercisePreferences ?? {},
+      proUnlocked: Boolean(parsed.proUnlocked),
+      trainingGoal: normalizeTrainingGoal(parsed.trainingGoal),
+      myMenus: Array.isArray(parsed.myMenus) ? parsed.myMenus : [],
+      pickerStepSettings: parsed.pickerStepSettings ?? DEFAULT_PICKER_STEP_SETTINGS,
+      bodyProfile: parsed.bodyProfile ?? DEFAULT_BODY_PROFILE,
+    }
+  } catch (error) {
+    console.error('Failed to load user settings sync snapshot', error)
+    window.localStorage.removeItem(USER_SETTINGS_SYNC_STORAGE_KEY)
+    return null
+  }
+}
+
+function saveUserSettingsSyncSnapshot(snapshot: UserSettingsSnapshot) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(USER_SETTINGS_SYNC_STORAGE_KEY, JSON.stringify(snapshot))
+}
+
+function loadPickerKeypadSeen() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  return window.localStorage.getItem(PICKER_KEYPAD_SEEN_STORAGE_KEY) === '1'
 }
 
 function createDefaultSetsForExercise(exerciseName: string, metricType: ExerciseMetricType = getDefaultExerciseMetricType(exerciseName)): ExerciseSet[] {
@@ -989,6 +1616,37 @@ function loadCustomExercisesByBodyPart(): Record<BodyPart, string[]> {
   }
 }
 
+function loadCustomExercisesSyncSnapshot(): Record<BodyPart, string[]> | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const raw = window.localStorage.getItem(CUSTOM_EXERCISES_SYNC_STORAGE_KEY)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<Record<BodyPart, string[]>>
+    return normalizeCustomExercisesByBodyPart({
+      ...createEmptyCustomExercisesByBodyPart(),
+      ...parsed,
+    })
+  } catch (error) {
+    console.error('Failed to load custom exercises sync snapshot', error)
+    window.localStorage.removeItem(CUSTOM_EXERCISES_SYNC_STORAGE_KEY)
+    return null
+  }
+}
+
+function saveCustomExercisesSyncSnapshot(snapshot: Record<BodyPart, string[]>) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(CUSTOM_EXERCISES_SYNC_STORAGE_KEY, JSON.stringify(snapshot))
+}
+
 function normalizeCustomExercisesByBodyPart(customExercisesByBodyPart: Record<BodyPart, string[]>) {
   const normalized = createEmptyCustomExercisesByBodyPart()
   BODY_PARTS.forEach((part) => {
@@ -997,6 +1655,80 @@ function normalizeCustomExercisesByBodyPart(customExercisesByBodyPart: Record<Bo
     )
   })
   return normalized
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((value, index) => value === right[index])
+}
+
+function isUserSettingsSnapshotEqual(left: UserSettingsSnapshot, right: UserSettingsSnapshot) {
+  return (
+    JSON.stringify(left.exerciseNotes) === JSON.stringify(right.exerciseNotes)
+    && JSON.stringify(left.exercisePreferences) === JSON.stringify(right.exercisePreferences)
+    && left.proUnlocked === right.proUnlocked
+    && left.trainingGoal === right.trainingGoal
+    && JSON.stringify(left.myMenus) === JSON.stringify(right.myMenus)
+    && JSON.stringify(left.pickerStepSettings) === JSON.stringify(right.pickerStepSettings)
+    && JSON.stringify(left.bodyProfile) === JSON.stringify(right.bodyProfile)
+  )
+}
+
+function normalizeUserSettingsSnapshot(snapshot: UserSettingsSnapshot): UserSettingsSnapshot {
+  return {
+    exerciseNotes: snapshot.exerciseNotes,
+    exercisePreferences: snapshot.exercisePreferences,
+    proUnlocked: snapshot.proUnlocked,
+    trainingGoal: snapshot.trainingGoal,
+    myMenus: snapshot.myMenus,
+    pickerStepSettings: snapshot.pickerStepSettings,
+    bodyProfile: snapshot.bodyProfile,
+  }
+}
+
+function mergeCustomExercisesSnapshot(
+  current: Record<BodyPart, string[]>,
+  remote: Record<BodyPart, string[]>,
+  baseline: Record<BodyPart, string[]>,
+) {
+  const next = createEmptyCustomExercisesByBodyPart()
+  BODY_PARTS.forEach((part) => {
+    const currentPart = current[part] ?? []
+    const remotePart = remote[part] ?? []
+    const baselinePart = baseline[part] ?? []
+    next[part] = areStringArraysEqual(currentPart, baselinePart) ? remotePart : currentPart
+  })
+  return normalizeCustomExercisesByBodyPart(next)
+}
+
+function mergeUserSettingsSnapshot(
+  current: UserSettingsSnapshot,
+  remote: UserSettingsSnapshot,
+  baseline: UserSettingsSnapshot,
+) {
+  return normalizeUserSettingsSnapshot({
+    exerciseNotes:
+      JSON.stringify(current.exerciseNotes) === JSON.stringify(baseline.exerciseNotes)
+        ? remote.exerciseNotes
+        : current.exerciseNotes,
+    exercisePreferences:
+      JSON.stringify(current.exercisePreferences) === JSON.stringify(baseline.exercisePreferences)
+        ? remote.exercisePreferences
+        : current.exercisePreferences,
+    proUnlocked: current.proUnlocked === baseline.proUnlocked ? remote.proUnlocked : current.proUnlocked,
+    trainingGoal: current.trainingGoal === baseline.trainingGoal ? remote.trainingGoal : current.trainingGoal,
+    myMenus: JSON.stringify(current.myMenus) === JSON.stringify(baseline.myMenus) ? remote.myMenus : current.myMenus,
+    pickerStepSettings:
+      JSON.stringify(current.pickerStepSettings) === JSON.stringify(baseline.pickerStepSettings)
+        ? remote.pickerStepSettings
+        : current.pickerStepSettings,
+    bodyProfile:
+      JSON.stringify(current.bodyProfile) === JSON.stringify(baseline.bodyProfile)
+        ? remote.bodyProfile
+        : current.bodyProfile,
+  })
 }
 
 function createSession(
@@ -1021,13 +1753,11 @@ function createSession(
 }
 
 function AuthView({
-  onDemoStart,
   onLogin,
   onGoogleLogin,
   onStartPhoneLogin,
   onVerifyPhoneCode,
 }: {
-  onDemoStart: () => void
   onLogin: (email: string, password: string, mode: AuthMode) => Promise<void>
   onGoogleLogin: () => Promise<void>
   onStartPhoneLogin: (phoneNumber: string) => Promise<void>
@@ -1112,27 +1842,19 @@ function AuthView({
     <main className="auth-screen">
       <h1>Atlas</h1>
       <p className="subtitle">筋トレを続けたくなるトレーニング管理</p>
-      {!isFirebaseConfigured && (
-        <div className="notice">
-          Firebase未設定です。まず .env に Firebase キーを設定してください。<br />
-          設定前でもデモモードで利用できます。
-          <button type="button" onClick={onDemoStart}>
-            デモモードで続ける
+      <p className="auth-lead">ログインすると、記録・履歴・分析がそのまま使えます。</p>
+      <form className="card auth-form-card" onSubmit={handleSubmit}>
+        <div className="auth-tabs">
+          <button type="button" onClick={() => setMode('login')} className={mode === 'login' ? 'active' : ''}>
+            ログイン
+          </button>
+          <button type="button" onClick={() => setMode('signup')} className={mode === 'signup' ? 'active' : ''}>
+            新規登録
+          </button>
+          <button type="button" onClick={() => setMode('reset')} className={mode === 'reset' ? 'active' : ''}>
+            再設定
           </button>
         </div>
-      )}
-      <div className="auth-tabs">
-        <button type="button" onClick={() => setMode('login')} className={mode === 'login' ? 'active' : ''}>
-          ログイン
-        </button>
-        <button type="button" onClick={() => setMode('signup')} className={mode === 'signup' ? 'active' : ''}>
-          新規登録
-        </button>
-        <button type="button" onClick={() => setMode('reset')} className={mode === 'reset' ? 'active' : ''}>
-          パスワード再設定
-        </button>
-      </div>
-      <form className="card" onSubmit={handleSubmit}>
         <label>
           メールアドレス
           <input
@@ -1162,30 +1884,37 @@ function AuthView({
         {message && <p className="success">{message}</p>}
       </form>
 
-      <section className="card">
-        <h3>Googleログイン</h3>
-        <button type="button" onClick={() => void handleGoogleSignIn()} disabled={pending}>
-          Googleで続ける
-        </button>
-      </section>
-
-      <section className="card">
-        <h3>電話番号ログイン</h3>
-        <label>
-          電話番号（例: +819012345678）
-          <input
-            value={phoneNumber}
-            onChange={(e) => setPhoneNumber(e.target.value)}
-            type="tel"
-            placeholder="+81..."
-          />
-        </label>
-        <button type="button" onClick={() => void handleSendPhoneCode()} disabled={phonePending}>
-          {phonePending ? '送信中...' : 'SMSコードを送信'}
-        </button>
-
+      <section className="card auth-provider-card">
+        <div className="auth-provider-row">
+          <div>
+            <h3>Googleログイン</h3>
+            <p>端末をまたいでそのまま使う人向け。</p>
+          </div>
+          <button type="button" onClick={() => void handleGoogleSignIn()} disabled={pending}>
+            続ける
+          </button>
+        </div>
+        <div className="auth-divider" />
+        <div className="auth-provider-row auth-phone-row">
+          <div>
+            <h3>電話番号ログイン</h3>
+            <p>SMSで素早く入るときに使えます。</p>
+          </div>
+          <label>
+            電話番号
+            <input
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              type="tel"
+              placeholder="+81..."
+            />
+          </label>
+          <button type="button" onClick={() => void handleSendPhoneCode()} disabled={phonePending}>
+            {phonePending ? '送信中...' : 'SMS送信'}
+          </button>
+        </div>
         {phoneCodeSent && (
-          <>
+          <div className="auth-phone-code-row">
             <label>
               認証コード
               <input
@@ -1195,9 +1924,9 @@ function AuthView({
               />
             </label>
             <button type="button" onClick={() => void handleVerifyPhoneCode()} disabled={phonePending}>
-              {phonePending ? '確認中...' : 'コード確認してログイン'}
+              {phonePending ? '確認中...' : 'ログイン'}
             </button>
-          </>
+          </div>
         )}
         <div id="recaptcha-container" />
       </section>
@@ -1210,7 +1939,6 @@ function App() {
   const [tab, setTab] = useState<AppTab>('home')
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [isDemoMode, setIsDemoMode] = useState(false)
   const [selectedBodyPart, setSelectedBodyPart] = useState<BodyPart>('胸')
   const [selectedExercise, setSelectedExercise] = useState('')
   const [workoutPhase, setWorkoutPhase] = useState<WorkoutPhase>('body')
@@ -1227,6 +1955,7 @@ function App() {
   const [historySelectedDate, setHistorySelectedDate] = useState<string | null>(null)
   const [historyOpenDates, setHistoryOpenDates] = useState<string[]>([])
   const [analyticsWindowDays, setAnalyticsWindowDays] = useState<7 | 30>(7)
+  const [analyticsPanel, setAnalyticsPanel] = useState<AnalyticsPanel>('overview')
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState('')
   const [customExerciseInput, setCustomExerciseInput] = useState('')
   const [customExerciseMetricType, setCustomExerciseMetricType] = useState<ExerciseMetricType>('reps')
@@ -1235,6 +1964,22 @@ function App() {
   >(loadCustomExercisesByBodyPart)
   const [isCustomExercisesHydrated, setIsCustomExercisesHydrated] = useState(false)
   const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>(loadExerciseNotes)
+  const [pickerStepSettings, setPickerStepSettings] = useState<PickerStepSettings>(loadPickerStepSettings)
+  const [bodyProfile, setBodyProfile] = useState<BodyProfile>(loadBodyProfile)
+  const [trainingGoal, setTrainingGoal] = useState<TrainingGoal>(loadTrainingGoal)
+  const [literatureSections, setLiteratureSections] = useState<LiteratureSection[]>([])
+  const [literatureUpdatedAt, setLiteratureUpdatedAt] = useState<string | null>(null)
+  const [isLiteratureLoading, setIsLiteratureLoading] = useState(false)
+  const [literatureError, setLiteratureError] = useState<string | null>(null)
+  const [literatureRefreshTick, setLiteratureRefreshTick] = useState(0)
+  const analyticsPanelRefs = useRef<Record<AnalyticsPanel, HTMLElement | null>>({
+    overview: null,
+    decision: null,
+    action: null,
+  })
+  const [hasSeenPickerKeypad, setHasSeenPickerKeypad] = useState(loadPickerKeypadSeen)
+  const [isPickerKeypadMode, setIsPickerKeypadMode] = useState(false)
+  const [pickerKeypadDraft, setPickerKeypadDraft] = useState('')
   const [isUserSettingsHydrated, setIsUserSettingsHydrated] = useState(false)
   const [exerciseNoteDraft, setExerciseNoteDraft] = useState('')
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
@@ -1254,6 +1999,7 @@ function App() {
   const [isRestTimerExpanded, setIsRestTimerExpanded] = useState(false)
   const [restTimerNotice, setRestTimerNotice] = useState<string | null>(null)
   const [restTimerOffset, setRestTimerOffset] = useState({ x: 0, y: 0 })
+  const [restTimerPanelStyle, setRestTimerPanelStyle] = useState<CSSProperties>({ visibility: 'hidden' })
   const [exerciseSetDrafts, setExerciseSetDrafts] = useState<
     Record<string, Array<Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>>>
   >({})
@@ -1267,20 +2013,49 @@ function App() {
   const toastTimerRef = useRef<number | null>(null)
   const restTimerNoticeRef = useRef<number | null>(null)
   const restTimerFloatingRef = useRef<HTMLDivElement | null>(null)
+  const restTimerPanelRef = useRef<HTMLDivElement | null>(null)
   const restTimerDragRef = useRef<{
     pointerId: number
     startX: number
     startY: number
     originX: number
     originY: number
+    originLeft: number
+    originTop: number
+    width: number
+    height: number
     dragged: boolean
   } | null>(null)
   const previousStreakDaysRef = useRef<number | null>(null)
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
   const previousMainTabRef = useRef<MainTab>('home')
   const [phoneConfirmation, setPhoneConfirmation] = useState<ConfirmationResult | null>(null)
-  const lastCustomExercisesSyncRef = useRef<string | null>(null)
-  const lastUserSettingsSyncRef = useRef<string | null>(null)
+  const lastCustomExercisesSyncRef = useRef<Record<BodyPart, string[]>>(
+    loadCustomExercisesSyncSnapshot() ?? customExercisesByBodyPart,
+  )
+  const lastUserSettingsSyncRef = useRef<UserSettingsSnapshot>(
+    loadUserSettingsSyncSnapshot() ?? {
+      exerciseNotes,
+      exercisePreferences,
+      proUnlocked: isProUnlocked,
+      trainingGoal,
+      myMenus,
+      pickerStepSettings,
+      bodyProfile,
+    },
+  )
+  const hasCustomExercisesSyncedRef = useRef(Boolean(loadCustomExercisesSyncSnapshot()))
+  const hasUserSettingsSyncedRef = useRef(Boolean(loadUserSettingsSyncSnapshot()))
+  const currentCustomExercisesRef = useRef(customExercisesByBodyPart)
+  const currentUserSettingsRef = useRef<UserSettingsSnapshot>({
+    exerciseNotes,
+    exercisePreferences,
+    proUnlocked: isProUnlocked,
+    trainingGoal,
+    myMenus,
+    pickerStepSettings,
+    bodyProfile,
+  })
 
   useEffect(() => {
     if (!auth) {
@@ -1293,6 +2068,22 @@ function App() {
       setLoading(false)
     })
   }, [])
+
+  useEffect(() => {
+    currentCustomExercisesRef.current = customExercisesByBodyPart
+  }, [customExercisesByBodyPart])
+
+  useEffect(() => {
+    currentUserSettingsRef.current = {
+      exerciseNotes,
+      exercisePreferences,
+      proUnlocked: isProUnlocked,
+      trainingGoal,
+      myMenus,
+      pickerStepSettings,
+      bodyProfile,
+    }
+  }, [bodyProfile, exerciseNotes, exercisePreferences, isProUnlocked, myMenus, pickerStepSettings, trainingGoal])
 
   useEffect(() => {
     const activateAudioContext = () => {
@@ -1357,6 +2148,16 @@ function App() {
   }, [tab])
 
   useEffect(() => {
+    if (tab !== 'workout') {
+      return
+    }
+
+    if (workoutPhase === 'record' && !selectedExercise.trim()) {
+      setWorkoutPhase('body')
+    }
+  }, [selectedExercise, tab, workoutPhase])
+
+  useEffect(() => {
     if (!historySelectedDate) {
       return
     }
@@ -1389,11 +2190,97 @@ function App() {
       return
     }
 
+    window.localStorage.setItem(PICKER_STEP_SETTINGS_STORAGE_KEY, JSON.stringify(pickerStepSettings))
+  }, [pickerStepSettings])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(BODY_PROFILE_STORAGE_KEY, JSON.stringify(bodyProfile))
+  }, [bodyProfile])
+
+  useEffect(() => {
+    saveTrainingGoal(trainingGoal)
+  }, [trainingGoal])
+
+  useEffect(() => {
+    if (tab !== 'sources') {
+      return
+    }
+
+    const abortController = new AbortController()
+    setIsLiteratureLoading(true)
+    setLiteratureError(null)
+
+    void fetch(`/api/literature?goal=${encodeURIComponent(trainingGoal)}`, {
+      signal: abortController.signal,
+      cache: 'no-store',
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`文献取得に失敗しました (${response.status})`)
+        }
+        return response.json() as Promise<{
+          updatedAt: string
+          sections: LiteratureSection[]
+        }>
+      })
+      .then((payload) => {
+        setLiteratureSections(payload.sections)
+        setLiteratureUpdatedAt(payload.updatedAt)
+      })
+      .catch((error) => {
+        if (abortController.signal.aborted) {
+          return
+        }
+        console.error('Failed to load literature', error)
+        setLiteratureSections([])
+        setLiteratureUpdatedAt(null)
+        setLiteratureError('最新文献の取得に失敗しました。再読み込みで再試行できます。')
+      })
+      .finally(() => {
+        if (!abortController.signal.aborted) {
+          setIsLiteratureLoading(false)
+        }
+      })
+
+    return () => {
+      abortController.abort()
+    }
+  }, [literatureRefreshTick, tab, trainingGoal])
+
+  useEffect(() => {
+    if (tab !== 'analytics') {
+      return
+    }
+
+    analyticsPanelRefs.current[analyticsPanel]?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+      inline: 'start',
+    })
+  }, [analyticsPanel, tab])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(PICKER_KEYPAD_SEEN_STORAGE_KEY, hasSeenPickerKeypad ? '1' : '0')
+  }, [hasSeenPickerKeypad])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
     window.localStorage.setItem(CUSTOM_EXERCISES_STORAGE_KEY, JSON.stringify(customExercisesByBodyPart))
   }, [customExercisesByBodyPart])
 
   useEffect(() => {
-    if (!db || !user || isDemoMode) {
+    if (!db || !user) {
       setIsCustomExercisesHydrated(true)
       return
     }
@@ -1405,14 +2292,21 @@ function App() {
     const unsubscribeCustomExercises = subscribeCustomExercises(activeDb, uid, (remoteCustomExercises) => {
       if (remoteCustomExercises) {
         const normalizedRemote = normalizeCustomExercisesByBodyPart(remoteCustomExercises)
+        const pendingCustomExercises = getPendingCustomExercisesSavePayload()
         setCustomExercisesByBodyPart((current) => {
-          const currentSignature = JSON.stringify(current)
-          const remoteSignature = JSON.stringify(normalizedRemote)
-          if (currentSignature === remoteSignature) {
+          const baseline = lastCustomExercisesSyncRef.current ?? pendingCustomExercises ?? current
+          const nextValue = mergeCustomExercisesSnapshot(current, normalizedRemote, baseline)
+          const nextBaseline = mergeCustomExercisesSnapshot(baseline, normalizedRemote, baseline)
+          if (JSON.stringify(current) === JSON.stringify(nextValue)) {
+            lastCustomExercisesSyncRef.current = nextBaseline
+            saveCustomExercisesSyncSnapshot(nextBaseline)
+            hasCustomExercisesSyncedRef.current = true
             return current
           }
-          lastCustomExercisesSyncRef.current = remoteSignature
-          return normalizedRemote
+          lastCustomExercisesSyncRef.current = nextBaseline
+          saveCustomExercisesSyncSnapshot(nextBaseline)
+          hasCustomExercisesSyncedRef.current = true
+          return nextValue
         })
       }
       setIsCustomExercisesHydrated(true)
@@ -1421,36 +2315,39 @@ function App() {
     return () => {
       unsubscribeCustomExercises()
     }
-  }, [db, isDemoMode, user])
+  }, [db, user])
 
   useEffect(() => {
-    if (!db || !user || isDemoMode || !isCustomExercisesHydrated) {
+    if (!db || !user || !isCustomExercisesHydrated) {
       return
     }
 
     const activeDb = db
     const uid = user.uid
-    const payload = normalizeCustomExercisesByBodyPart(customExercisesByBodyPart)
+    const payload = normalizeCustomExercisesByBodyPart(currentCustomExercisesRef.current)
+    const baseline = lastCustomExercisesSyncRef.current ?? loadCustomExercisesSyncSnapshot()
     const payloadSignature = JSON.stringify(payload)
 
-    if (lastCustomExercisesSyncRef.current === payloadSignature) {
-      return
+    if (hasCustomExercisesSyncedRef.current && baseline && payloadSignature === JSON.stringify(baseline)) {
+     return
     }
 
     void saveCustomExercises(activeDb, uid, payload)
-      .then(() => {
-        lastCustomExercisesSyncRef.current = payloadSignature
-        setSyncStatus('クラウド同期済み')
-      })
-      .catch(() => {
+     .then(() => {
+       lastCustomExercisesSyncRef.current = payload
+       saveCustomExercisesSyncSnapshot(payload)
+       hasCustomExercisesSyncedRef.current = true
+       setSyncStatus('クラウド同期済み')
+     })
+     .catch(() => {
         queueCustomExercisesSave(payload)
         setSyncStatus('同期待機中...')
         showToast('種目リストの同期に失敗しました。再試行します', 'error')
       })
-  }, [customExercisesByBodyPart, db, isCustomExercisesHydrated, isDemoMode, user])
+  }, [customExercisesByBodyPart, db, isCustomExercisesHydrated, user])
 
   useEffect(() => {
-    if (!db || !user || isDemoMode) {
+    if (!db || !user) {
       setIsUserSettingsHydrated(true)
       return
     }
@@ -1461,16 +2358,32 @@ function App() {
 
     const unsubscribeUserSettings = subscribeUserSettings(activeDb, uid, (remoteUserSettings) => {
       if (remoteUserSettings) {
-        setExerciseNotes(remoteUserSettings.exerciseNotes)
-        setExercisePreferences(remoteUserSettings.exercisePreferences)
-        setMyMenus(remoteUserSettings.myMenus)
-        setIsProUnlocked(remoteUserSettings.proUnlocked)
-        lastUserSettingsSyncRef.current = JSON.stringify({
+        const pendingUserSettings = getPendingUserSettingsSavePayload()
+        const normalizedRemote: UserSettingsSnapshot = {
           exerciseNotes: remoteUserSettings.exerciseNotes,
           exercisePreferences: remoteUserSettings.exercisePreferences,
           proUnlocked: remoteUserSettings.proUnlocked,
+          trainingGoal: remoteUserSettings.trainingGoal,
           myMenus: remoteUserSettings.myMenus,
-        })
+          pickerStepSettings: remoteUserSettings.pickerStepSettings,
+          bodyProfile: remoteUserSettings.bodyProfile,
+        }
+        const currentSnapshot = currentUserSettingsRef.current
+        const baseline = lastUserSettingsSyncRef.current ?? pendingUserSettings ?? currentSnapshot
+        const nextSnapshot = mergeUserSettingsSnapshot(currentSnapshot, normalizedRemote, baseline)
+        const nextBaseline = mergeUserSettingsSnapshot(baseline, normalizedRemote, baseline)
+        if (!isUserSettingsSnapshotEqual(currentSnapshot, nextSnapshot)) {
+          setExerciseNotes(nextSnapshot.exerciseNotes)
+          setExercisePreferences(nextSnapshot.exercisePreferences)
+          setMyMenus(nextSnapshot.myMenus)
+          setIsProUnlocked(nextSnapshot.proUnlocked)
+          setTrainingGoal(nextSnapshot.trainingGoal)
+          setPickerStepSettings(nextSnapshot.pickerStepSettings)
+          setBodyProfile(nextSnapshot.bodyProfile)
+        }
+        lastUserSettingsSyncRef.current = nextBaseline
+        saveUserSettingsSyncSnapshot(nextBaseline)
+        hasUserSettingsSyncedRef.current = true
       }
       setIsUserSettingsHydrated(true)
     })
@@ -1478,30 +2391,28 @@ function App() {
     return () => {
       unsubscribeUserSettings()
     }
-  }, [db, isDemoMode, setMyMenus, user])
+  }, [db, setMyMenus, user])
 
   useEffect(() => {
-    if (!db || !user || isDemoMode || !isUserSettingsHydrated) {
+    if (!db || !user || !isUserSettingsHydrated) {
       return
     }
 
     const activeDb = db
     const uid = user.uid
-    const payload = {
-      exerciseNotes,
-      exercisePreferences,
-      proUnlocked: isProUnlocked,
-      myMenus,
-    }
+    const payload = currentUserSettingsRef.current
+    const baseline = lastUserSettingsSyncRef.current ?? loadUserSettingsSyncSnapshot()
     const payloadSignature = JSON.stringify(payload)
 
-    if (lastUserSettingsSyncRef.current === payloadSignature) {
+    if (hasUserSettingsSyncedRef.current && baseline && payloadSignature === JSON.stringify(baseline)) {
       return
     }
 
     void saveUserSettings(activeDb, uid, payload)
       .then(() => {
-        lastUserSettingsSyncRef.current = payloadSignature
+        lastUserSettingsSyncRef.current = payload
+        saveUserSettingsSyncSnapshot(payload)
+        hasUserSettingsSyncedRef.current = true
         setSyncStatus('クラウド同期済み')
       })
       .catch(() => {
@@ -1509,7 +2420,7 @@ function App() {
         setSyncStatus('同期待機中...')
         showToast('設定の同期に失敗しました。再試行します', 'error')
       })
-  }, [db, exerciseNotes, exercisePreferences, isDemoMode, isProUnlocked, isUserSettingsHydrated, myMenus, user])
+  }, [bodyProfile, db, exerciseNotes, exercisePreferences, isProUnlocked, isUserSettingsHydrated, myMenus, pickerStepSettings, user])
 
   useEffect(() => {
     if (!exerciseInfoTarget) {
@@ -1548,6 +2459,7 @@ function App() {
       if (wheelScrollTimerRef.current) {
         window.clearTimeout(wheelScrollTimerRef.current)
       }
+      clearRestTimerAdjustmentHold()
     }
   }, [])
 
@@ -1556,8 +2468,8 @@ function App() {
       return []
     }
 
-    return getPickerOptionsForExercise(selectedExercise, pickerTarget.key)
-  }, [pickerTarget, selectedExercise])
+    return getPickerOptionsForExercise(selectedExercise, pickerTarget.key, pickerStepSettings)
+  }, [pickerStepSettings, pickerTarget, selectedExercise])
 
   useEffect(() => {
     if (!pickerTarget || pickerOptions.length === 0) {
@@ -1575,7 +2487,7 @@ function App() {
   }, [pickerOptions, pickerTarget])
 
   useEffect(() => {
-    if (!db || !user || isDemoMode) {
+    if (!db || !user) {
       setSyncStatus('ローカル保存')
       return
     }
@@ -1585,9 +2497,18 @@ function App() {
 
     setSyncStatus('クラウド同期中...')
     const unsubscribeSessions = subscribeSessions(activeDb, uid, (nextSessions) => {
-      const mergedSessions = mergeWorkoutSessions(useAtlasStore.getState().sessions, nextSessions)
+      const pendingSessionSyncState = getPendingSessionSyncState()
+      const mergedSessions = mergeWorkoutSessions(
+        useAtlasStore.getState().sessions,
+        nextSessions,
+        pendingSessionSyncState,
+      )
       setSessions(mergedSessions)
-      setSyncStatus('クラウド同期済み')
+      setSyncStatus(
+        pendingSessionSyncState.savingIds.size > 0 || pendingSessionSyncState.deletingIds.size > 0
+          ? 'クラウド同期待機中...'
+          : 'クラウド同期済み',
+      )
     })
 
     const flushSyncQueue = () => {
@@ -1620,9 +2541,9 @@ function App() {
       window.removeEventListener('online', handleOnline)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [db, isDemoMode, setSessions, user])
+  }, [db, setSessions, user])
 
-  const canUseApp = Boolean(user) || isDemoMode
+  const canUseApp = Boolean(user)
 
   const historyMonth = useMemo(() => dayjs(historyMonthCursor), [historyMonthCursor])
 
@@ -1888,7 +2809,7 @@ function App() {
       腕: 4.7,
       腹筋: 4.4,
     }
-    const assumedBodyWeightKg = 70
+    const assumedBodyWeightKg = bodyProfile.weightKg ?? 70
 
     sessions.forEach((session) => {
       const sessionDay = dayjs(session.date).startOf('day')
@@ -1938,7 +2859,7 @@ function App() {
     })
     const total = caloriesByDay.reduce((sum, day) => sum + day.value, 0)
     return { caloriesByDay, total }
-  }, [sessions])
+  }, [bodyProfile.weightKg, sessions])
 
   const weeklyCaloriesSummary = useMemo(() => {
     const dayLabels = ['日', '月', '火', '水', '木', '金', '土']
@@ -1958,17 +2879,17 @@ function App() {
     }
   }, [weeklyCalories])
 
+  const bodyProfileInsight = useMemo(() => getBodyProfileInsight(bodyProfile), [bodyProfile])
+
   const homeAiMessage = useMemo(() => {
     if (sessions.length === 0) {
-      return '最初の1セットを記録して、あなた専用のメッセージを育てよう。'
+      return '最初の記録を入れよう。'
     }
 
     const latest = [...sessions].sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())[0]
     const restDays = dayjs().diff(dayjs(latest.date), 'day')
-    const weeklyKcal = weeklyCalories.total
-    const raw = `前回は${dayjs(latest.date).format('M/D')}。休養${restDays}日、今週推定${weeklyKcal}kcal。今日はフォームを丁寧に積み上げよう。`
-    return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw
-  }, [sessions, weeklyCalories.total])
+    return `前回 ${dayjs(latest.date).format('M/D')}・休養${restDays}日。${bodyProfileInsight.homeHint}`
+  }, [bodyProfileInsight.homeHint, sessions])
 
   const latestSessionSummary = useMemo(() => {
     if (sessions.length === 0) {
@@ -2175,6 +3096,28 @@ function App() {
     return readinessMap
   }, [daysSinceByBodyPart])
 
+  const homeRecommendedBodyPart = useMemo(() => {
+    if (sessions.length === 0) {
+      return null
+    }
+
+    const recommended =
+      daysSinceByBodyPart.find((item) => item.days >= 4 && item.days < 999) ??
+      daysSinceByBodyPart.find((item) => item.days === 999) ??
+      daysSinceByBodyPart[0]
+
+    if (!recommended) {
+      return null
+    }
+
+    const readiness = bodyPartReadiness.get(recommended.part)
+    return {
+      part: recommended.part,
+      label: readiness?.label ?? recommended.label,
+      tone: readiness?.tone ?? 'new',
+    }
+  }, [bodyPartReadiness, daysSinceByBodyPart, sessions.length])
+
   const selectedExerciseMetricType = useMemo(() => {
     const draftKey = getExerciseDraftKey(selectedBodyPart, selectedExercise)
     return exercisePreferences[draftKey]?.metricType ?? getDefaultExerciseMetricType(selectedExercise)
@@ -2195,39 +3138,119 @@ function App() {
   const restTimerLabel = `${String(Math.floor(restSeconds / 60)).padStart(2, '0')}:${String(restSeconds % 60).padStart(2, '0')}`
   const shouldShowRestTimerFloating = tab !== 'settings' && (workoutPhase === 'record' || timerRunning)
 
+  useLayoutEffect(() => {
+    if (!shouldShowRestTimerFloating || !isRestTimerExpanded) {
+      setRestTimerPanelStyle({ visibility: 'hidden' })
+      return
+    }
+
+    const floating = restTimerFloatingRef.current
+    const panel = restTimerPanelRef.current
+    if (!floating || !panel) {
+      return
+    }
+
+    const updatePlacement = () => {
+      const nextLayout = getRestTimerPanelLayout(
+        floating.getBoundingClientRect(),
+        panel.getBoundingClientRect(),
+        floating.getBoundingClientRect(),
+        window.innerWidth,
+        window.innerHeight,
+      )
+      setRestTimerPanelStyle(nextLayout.style)
+    }
+
+    updatePlacement()
+    window.addEventListener('resize', updatePlacement)
+    window.addEventListener('scroll', updatePlacement, true)
+
+    return () => {
+      window.removeEventListener('resize', updatePlacement)
+      window.removeEventListener('scroll', updatePlacement, true)
+    }
+  }, [isRestTimerExpanded, restTimerOffset.x, restTimerOffset.y, shouldShowRestTimerFloating])
+
   useEffect(() => {
     if (!shouldShowRestTimerFloating) {
       setIsRestTimerExpanded(false)
     }
   }, [shouldShowRestTimerFloating])
 
-  useEffect(() => {
-    if (!shouldShowRestTimerFloating || !restTimerFloatingRef.current) {
+  function handleRestTimerPointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const floatingRect = restTimerFloatingRef.current?.getBoundingClientRect()
+    restTimerDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: restTimerOffset.x,
+      originY: restTimerOffset.y,
+      originLeft: floatingRect?.left ?? 0,
+      originTop: floatingRect?.top ?? 0,
+      width: floatingRect?.width ?? 0,
+      height: floatingRect?.height ?? 0,
+      dragged: false,
+    }
+  }
+
+  function handleRestTimerPointerMove(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragState = restTimerDragRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
       return
     }
 
-    const rect = restTimerFloatingRef.current.getBoundingClientRect()
-    const minGap = 8
-    let adjustX = 0
-    let adjustY = 0
-    if (rect.left < minGap) {
-      adjustX = minGap - rect.left
-    } else if (rect.right > window.innerWidth - minGap) {
-      adjustX = window.innerWidth - minGap - rect.right
+    const deltaX = event.clientX - dragState.startX
+    const deltaY = event.clientY - dragState.startY
+    const movedEnough = Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10
+    if (movedEnough) {
+      dragState.dragged = true
     }
-    if (rect.top < minGap) {
-      adjustY = minGap - rect.top
-    } else if (rect.bottom > window.innerHeight - minGap) {
-      adjustY = window.innerHeight - minGap - rect.bottom
+    if (!dragState.dragged) {
+      return
     }
 
-    if (Math.abs(adjustX) > 0.5 || Math.abs(adjustY) > 0.5) {
-      setRestTimerOffset((previous) => ({
-        x: previous.x + adjustX,
-        y: previous.y + adjustY,
-      }))
+    const margin = 8
+    const minX = dragState.originX + margin - dragState.originLeft
+    const maxX = dragState.originX + window.innerWidth - margin - dragState.originLeft - dragState.width
+    const minY = dragState.originY + margin - dragState.originTop
+    const maxY = dragState.originY + window.innerHeight - margin - dragState.originTop - dragState.height
+    const nextX = Math.max(minX, Math.min(maxX, dragState.originX + deltaX))
+    const nextY = Math.max(minY, Math.min(maxY, dragState.originY + deltaY))
+    setRestTimerOffset({ x: nextX, y: nextY })
+  }
+
+  function handleRestTimerPointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragState = restTimerDragRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
     }
-  }, [isRestTimerExpanded, restTimerOffset, shouldShowRestTimerFloating])
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    const shouldToggle = !dragState.dragged
+    restTimerDragRef.current = null
+
+    if (shouldToggle) {
+      triggerHaptic(10)
+      setIsRestTimerExpanded((previous) => !previous)
+      return
+    }
+
+    triggerHaptic(8)
+  }
+
+  function handleRestTimerPointerCancel(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragState = restTimerDragRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    restTimerDragRef.current = null
+  }
 
   function vibrateAndSetTab(nextTab: AppTab, pattern: number | number[] = 12) {
     if (nextTab !== tab) {
@@ -2250,7 +3273,6 @@ function App() {
     setTab('settings')
   }
 
-  const selectedExerciseProfile = useMemo(() => getExerciseInputProfile(selectedExercise), [selectedExercise])
   const isInfoTargetInLibrary = useMemo(
     () => !!exerciseInfoTarget && customExercisesByBodyPart[selectedBodyPart].includes(exerciseInfoTarget),
     [customExercisesByBodyPart, exerciseInfoTarget, selectedBodyPart],
@@ -2439,9 +3461,14 @@ function App() {
 
     return [
       `${windowLabel}の総負荷は ${currentWindowVolume.toLocaleString()}pt（前期間比 ${volumeDeltaLabel}）。`,
+      bodyProfileInsight.bmi !== null
+      ? `体格は BMI ${bodyProfileInsight.bmi.toFixed(1)}（${bodyProfileInsight.bmiLabel}）。${bodyProfileInsight.trainingHint}`
+      : bodyProfileInsight.title,
+      bodyProfileInsight.nutritionHint,
+      bodyProfileInsight.recoveryHint,
       weightLeader
-        ? `指標伸び率トップは ${weightLeader.name}（${weightLeader.weightGrowthLabel}）。${weightLeader.metricType === 'time' ? '保持時間' : '回数'}は ${weightLeader.previousPeakMetric} → ${weightLeader.currentPeakMetric}。`
-        : '指標伸び率の比較対象データがまだ不足しています。',
+      ? `指標伸び率トップは ${weightLeader.name}（${weightLeader.weightGrowthLabel}）。${weightLeader.metricType === 'time' ? '保持時間' : '回数'}は ${weightLeader.previousPeakMetric} → ${weightLeader.currentPeakMetric}。`
+      : '指標伸び率の比較対象データがまだ不足しています。',
       volumeLeader
         ? `総負荷伸び率トップは ${volumeLeader.name}（${volumeLeader.volumeGrowthLabel}）。`
         : '総負荷伸び率の比較対象データがまだ不足しています。',
@@ -2449,7 +3476,7 @@ function App() {
         ? `${staleParts.map((item) => `${item.part}${item.days}日空き`).join(' / ')}。次回は優先的に実施推奨。`
         : '部位の休養バランスは良好です。負荷更新フェーズに入れます。',
     ]
-  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, daysSinceByBodyPart, growthRankings.volumeTop, growthRankings.weightTop, previousWindowVolume])
+  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, bodyProfileInsight.bmi, bodyProfileInsight.bmiLabel, bodyProfileInsight.nutritionHint, bodyProfileInsight.recoveryHint, bodyProfileInsight.title, bodyProfileInsight.trainingHint, daysSinceByBodyPart, growthRankings.volumeTop, growthRankings.weightTop, previousWindowVolume])
 
   const weightRankingInsight = useMemo(() => {
     const top = growthRankings.weightTop
@@ -2583,6 +3610,251 @@ function App() {
     ]
   }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, bodyPartWindowCounts, previousWindowVolume, sessions])
 
+  const analyticsDecisionSummary = useMemo(() => {
+    const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
+    const currentWindowSessions = sessions.filter((session) => {
+      const diff = dayjs().diff(dayjs(session.date), 'day')
+      return diff >= 0 && diff < analyticsWindowDays
+    }).length
+    const previousWindowSessions = sessions.filter((session) => {
+      const diff = dayjs().diff(dayjs(session.date), 'day')
+      return diff >= analyticsWindowDays && diff < analyticsWindowDays * 2
+    }).length
+    const volumeTrendPercent =
+      previousWindowVolume <= 0
+        ? currentWindowVolume > 0
+          ? null
+          : 0
+        : Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100)
+    const sessionTrendPercent =
+      previousWindowSessions <= 0
+        ? currentWindowSessions > 0
+          ? null
+          : 0
+        : Math.round(((currentWindowSessions - previousWindowSessions) / previousWindowSessions) * 100)
+    const sortedParts = [...daysSinceByBodyPart].sort((left, right) => right.days - left.days)
+    const priorityPart =
+      sortedParts.find((item) => item.days >= 7 && item.days < 999) ??
+      sortedParts.find((item) => item.days === 999) ??
+      sortedParts[0]
+    const topPart = [...bodyPartWindowCounts].sort((left, right) => right.count - left.count)[0]
+    const bottomPart = [...bodyPartWindowCounts].sort((left, right) => left.count - right.count)[0]
+    const balanceGap = topPart && bottomPart ? topPart.count - bottomPart.count : 0
+    const topGrowth = growthRankings.weightTop[0]
+    const plateauItem = growthRankings.weightTop.find(
+      (item) =>
+        item.previousPeakMetric > 0 &&
+        item.currentPeakMetric > 0 &&
+        item.weightGrowthLabel !== 'NEW' &&
+        !item.weightGrowthLabel.startsWith('+'),
+    )
+
+    const priorityLabel = priorityPart
+      ? priorityPart.days === 999
+        ? `未実施: ${priorityPart.part}`
+        : `${priorityPart.part} ${priorityPart.days}日空き`
+      : '判定中'
+    const priorityDetail = priorityPart
+      ? priorityPart.days >= 7
+        ? '空きすぎの部位です。今週の優先候補にすると全身バランスが整います。'
+        : priorityPart.days === 999
+          ? 'まだ未実施です。まず1回入れて基準値を作りましょう。'
+          : '回復は進んでいます。次回の優先候補として十分です。'
+      : 'データを蓄積中です。'
+
+    const balanceLabel =
+      topPart && bottomPart
+        ? `${topPart.part} ${topPart.count}回 / ${bottomPart.part} ${bottomPart.count}回`
+        : '判定中'
+    const balanceDetail =
+      balanceGap >= 3
+        ? '頻度差が大きめ。低頻度部位を1回補うと、伸びと回復の両方が安定します。'
+        : '頻度の偏りは小さめです。今の配分を保ちつつ記録更新へ進めます。'
+    const goalPlan = getGoalPlan(trainingGoal)
+    const targetSetBand = goalPlan.setBandLabel
+    const targetRestLabel = goalPlan.restLabel
+    const targetProgression =
+      plateauItem
+        ? goalPlan.progressionLabel
+        : volumeTrendPercent !== null && volumeTrendPercent >= 20
+          ? goalPlan.progressionLabel
+          : volumeTrendPercent !== null && volumeTrendPercent <= -10
+            ? goalPlan.progressionLabel
+            : goalPlan.progressionLabel
+
+    const nextActionLabel =
+      plateauItem
+        ? `${plateauItem.name}を再点検`
+        : topGrowth
+          ? `${topGrowth.name}を伸ばす`
+          : '次回の狙い'
+    const nextActionDetail =
+      plateauItem
+        ? '伸びが止まり気味です。重量維持で回数を1つ上げるか、セット構成を少し見直しましょう。'
+        : volumeTrendPercent !== null && volumeTrendPercent >= 20
+          ? '負荷が強く伸びています。次回は重量維持で回数+1を狙うと積み上がりやすいです。'
+          : volumeTrendPercent !== null && volumeTrendPercent <= -10
+            ? '負荷が落ちています。重量を守りつつ、セット数を減らしすぎないことが重要です。'
+            : '今の配分は安定。最も空いている部位か、伸びている種目を1つ選んで積み上げましょう。'
+
+    return {
+      periodLabel: analyticsWindowDays === 7 ? '7日基準' : '30日基準',
+      volumeTrendLabel:
+        volumeTrendPercent === null ? 'NEW' : `${volumeTrendPercent >= 0 ? '+' : ''}${volumeTrendPercent}%`,
+      sessionTrendLabel:
+        sessionTrendPercent === null ? '判定中' : `${sessionTrendPercent >= 0 ? '+' : ''}${sessionTrendPercent}%`,
+      priorityLabel,
+      priorityDetail,
+      balanceLabel,
+      balanceDetail,
+      nextActionLabel,
+      nextActionDetail,
+      topGrowthLabel: topGrowth ? `${topGrowth.name} ${topGrowth.weightGrowthLabel}` : '判定中',
+      targetSetBand,
+      targetRestLabel,
+      targetProgression,
+      goalSummary: goalPlan.summary,
+      goalFrequencyLabel: goalPlan.frequencyLabel,
+    }
+  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, bodyPartWindowCounts, daysSinceByBodyPart, growthRankings.weightTop, previousWindowVolume, sessions, trainingGoal])
+
+  const analyticsWindowBodyPartStats = useMemo(() => {
+    const now = dayjs()
+    return BODY_PARTS.map((part) => {
+      const partSessions = sessions.filter((session) => {
+        const diff = now.diff(dayjs(session.date), 'day')
+        return session.bodyPart === part && diff >= 0 && diff < analyticsWindowDays
+      })
+      const setCount = partSessions.reduce((sum, session) => {
+        return sum + session.exercises.reduce((exerciseSum, exercise) => exerciseSum + exercise.sets.length, 0)
+      }, 0)
+      return {
+        part,
+        sessionCount: partSessions.length,
+        setCount,
+      }
+    })
+  }, [analyticsWindowDays, sessions])
+
+  const analyticsCoachPlaybook = useMemo(() => {
+    const bySessionCount = [...analyticsWindowBodyPartStats].sort((left, right) => left.sessionCount - right.sessionCount)
+    const bySetCount = [...analyticsWindowBodyPartStats].sort((left, right) => left.setCount - right.setCount)
+    const priorityBySession = bySessionCount.find((item) => item.sessionCount <= 1) ?? bySessionCount[0]
+    const priorityBySet = bySetCount.find((item) => item.setCount < 10) ?? bySetCount[0]
+    const highSetPart = bySetCount.slice().reverse().find((item) => item.setCount >= 20)
+    const plateauItem = growthRankings.weightTop.find(
+      (item) =>
+        item.previousPeakMetric > 0 &&
+        item.currentPeakMetric > 0 &&
+        item.weightGrowthLabel !== 'NEW' &&
+        !item.weightGrowthLabel.startsWith('+'),
+    )
+    const goalPlan = getGoalPlan(trainingGoal)
+    const bodyGoalAlignment = getBodyGoalAlignment(bodyProfile, trainingGoal)
+
+    return [
+      {
+        icon: '📅',
+        label: '頻度',
+        title: priorityBySession ? `${priorityBySession.part} ${priorityBySession.sessionCount}回` : '判定中',
+        detail: priorityBySession
+          ? priorityBySession.sessionCount <= 1
+            ? `${goalPlan.frequencyLabel}を目安に。まずは空きすぎ部位を埋める。`
+            : `${goalPlan.frequencyLabel}以上に寄せると、${trainingGoal === 'ダイエット' ? '消費効率と維持' : '筋肥大の土台'}が作りやすい。`
+          : 'データを蓄積中です。',
+      },
+      {
+        icon: '🏋️',
+        label: '週セット数',
+        title: goalPlan.setBandLabel,
+        detail: priorityBySet
+          ? priorityBySet.setCount < 5
+            ? 'かなり少なめ。まずは5→10セット帯を目標に積み上げる。'
+            : priorityBySet.setCount < 10
+              ? '伸びしろあり。週10セット帯へ近づけると判断材料が増える。'
+              : priorityBySet.setCount < 20
+                ? '成長帯です。今のボリュームを維持しつつ、回数か重量を伸ばす。'
+                : '多めです。疲労を見ながら休憩と分割を工夫する。'
+          : 'データを蓄積中です。',
+      },
+      {
+        icon: '⏱️',
+        label: '休憩',
+        title: goalPlan.restLabel,
+        detail:
+          trainingGoal === 'ダイエット'
+            ? '減量中も重量を落としすぎない。複合種目はやや長め、補助種目は短めで密度を上げる。'
+            : '高強度では短すぎる休憩より、出力と総負荷を保つ方が重要。複合種目は長め、補助種目はやや短めでOK。',
+      },
+      {
+        icon: '🧩',
+        label: '進め方',
+        title: plateauItem ? `${plateauItem.name}を再設計` : highSetPart ? `${highSetPart.part}は高ボリューム` : goalPlan.progressionLabel,
+        detail: plateauItem
+          ? `停滞種目は、${goalPlan.progressionLabel}を基本に再構成。`
+          : highSetPart
+            ? '高ボリューム部位は、次回は回数維持か少し増加。疲労が強いならセット分割を。'
+            : `${goalPlan.summary}`,
+      },
+      {
+        icon: '🎯',
+        label: '最強処方箋',
+        title: analyticsDecisionSummary.targetSetBand,
+        detail: `休憩 ${analyticsDecisionSummary.targetRestLabel} / ${analyticsDecisionSummary.targetProgression}`,
+      },
+      {
+        icon: '🧠',
+        label: '目的',
+        title: trainingGoal,
+        detail: goalPlan.summary,
+      },
+      {
+        icon: '🪞',
+        label: '整合性',
+        title: bodyGoalAlignment.title,
+        detail: bodyGoalAlignment.detail,
+      },
+    ]
+  }, [
+    analyticsDecisionSummary.targetProgression,
+    analyticsDecisionSummary.targetRestLabel,
+    analyticsDecisionSummary.targetSetBand,
+    analyticsWindowBodyPartStats,
+    bodyProfile,
+    growthRankings.weightTop,
+    trainingGoal,
+  ])
+
+  const analyticsBodyPartPrescriptions = useMemo(() => {
+    return BODY_PARTS.map((part) => getNextBodyPartPrescription(part, sessions, trainingGoal, pickerStepSettings, bodyProfile))
+  }, [bodyProfile, pickerStepSettings, sessions, trainingGoal])
+
+  const analyticsVisualSummary = useMemo(() => {
+    const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
+    const topBodyPart = [...bodyPartWindowCounts].sort((left, right) => right.count - left.count)[0] ?? null
+    const maxBodyPartCount = bodyPartWindowCounts.reduce((max, item) => Math.max(max, item.count), 1)
+    const currentFill = previousWindowVolume > 0 ? Math.min(100, Math.max(8, Math.round((currentWindowVolume / Math.max(currentWindowVolume, previousWindowVolume)) * 100))) : 100
+    return {
+      windowLabel: analyticsWindowDays === 7 ? '直近7日' : '直近30日',
+      currentWindowVolume,
+      previousWindowVolume,
+      volumeTrendLabel:
+        previousWindowVolume <= 0
+          ? currentWindowVolume > 0
+            ? 'NEW'
+            : '0%'
+          : `${Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100) >= 0 ? '+' : ''}${Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100)}%`,
+      volumeFill: currentFill,
+      topBodyPart,
+      maxBodyPartCount,
+      bodyPartBars: bodyPartWindowCounts.map((item) => ({
+        ...item,
+        fill: Math.max(8, Math.round((item.count / maxBodyPartCount) * 100)),
+      })),
+      coverageCount: bodyPartWindowCounts.filter((item) => item.count > 0).length,
+    }
+  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, bodyPartWindowCounts, previousWindowVolume])
+
   const analyticsSummaryCards = useMemo(() => {
     const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
     const volumeTrendPercent =
@@ -2593,8 +3865,15 @@ function App() {
         : Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100)
     const topPart = [...bodyPartWindowCounts].sort((left, right) => right.count - left.count)[0]
     const topWeight = growthRankings.weightTop[0]
+    const bodyGoalAlignment = getBodyGoalAlignment(bodyProfile, trainingGoal)
 
     return [
+      {
+        icon: '👤',
+        label: '体格プロフィール',
+        title: bodyProfileInsight.title,
+        detail: `${bodyProfileInsight.detail} ${bodyProfileInsight.nutritionHint} ${bodyGoalAlignment.detail}`,
+      },
       {
         icon: '🧠',
         label: 'トレーニングタイプ',
@@ -2608,16 +3887,30 @@ function App() {
           volumeTrendPercent === null
             ? '初回基準を作成中'
             : `${volumeTrendPercent >= 0 ? '+' : ''}${volumeTrendPercent}%`,
-        detail: `総負荷 ${currentWindowVolume.toLocaleString()}pt`,
+        detail: `総負荷 ${currentWindowVolume.toLocaleString()}pt / セッション ${analyticsDecisionSummary.sessionTrendLabel}`,
       },
       {
         icon: '🎯',
         label: '主軸',
         title: topPart ? `${topPart.part} (${topPart.count}回)` : '判定中',
-        detail: topWeight ? `指標伸びトップ: ${topWeight.name} ${topWeight.weightGrowthLabel}` : '伸び率データを蓄積中',
+        detail: topWeight
+          ? `指標伸びトップ: ${topWeight.name} ${topWeight.weightGrowthLabel}`
+          : analyticsDecisionSummary.topGrowthLabel,
       },
     ]
-  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsNarrativeSummary, analyticsWindowDays, bodyPartWindowCounts, growthRankings.weightTop, previousWindowVolume])
+  }, [
+    analytics.monthlyTotal,
+    analytics.weeklyTotal,
+    analyticsNarrativeSummary,
+    analyticsWindowDays,
+    bodyPartWindowCounts,
+    bodyProfileInsight.detail,
+    bodyProfileInsight.title,
+    bodyProfile,
+    growthRankings.weightTop,
+    previousWindowVolume,
+    trainingGoal,
+  ])
 
   const bodyPartWindowCountsInsight = useMemo(() => {
     if (bodyPartWindowCounts.length === 0) {
@@ -2808,6 +4101,26 @@ function App() {
     resetCompleteConfirm()
   }
 
+  function startRecommendedWorkout(part: BodyPart) {
+    vibrateAndSetTab('workout', 18)
+    setEditingSessionId(null)
+    setDraftDate(dayjs().format('YYYY-MM-DD'))
+    setSelectedBodyPart(part)
+    setSelectedExercise('')
+    setSets([createSet(0), createSet(1), createSet(2)])
+    setCustomExerciseInput('')
+    setExerciseSearchQuery('')
+    setWorkoutPhase('exercise')
+    resetCompleteConfirm()
+  }
+
+  function updatePickerStepSetting(key: keyof PickerStepSettings, value: number) {
+    setPickerStepSettings((previous) => ({
+      ...previous,
+      [key]: value,
+    }))
+  }
+
   function startHistorySessionEdit(session: WorkoutSession) {
     const primaryExercise = session.exercises[0]
     if (!primaryExercise) {
@@ -2943,12 +4256,20 @@ function App() {
   }
 
   function openWheelPicker(setId: string, key: PickerTargetKey, currentValue: number) {
-    const nextValue = getNearestOption(getPickerOptionsForExercise(selectedExercise, key), currentValue)
+    const options = getPickerOptionsForExercise(selectedExercise, key, pickerStepSettings)
+    const nextValue = getNearestOption(options, currentValue)
     pickerOpenValueRef.current = nextValue
     lastWheelHapticValueRef.current = nextValue
     resetCompleteConfirm()
     setPickerTarget({ setId, key })
     setPickerValue(nextValue)
+    if (!hasSeenPickerKeypad) {
+      setHasSeenPickerKeypad(true)
+      setIsPickerKeypadMode(true)
+      setPickerKeypadDraft(String(nextValue))
+      return
+    }
+    setIsPickerKeypadMode(false)
   }
 
   function scrollWheelToIndex(index: number, behavior: ScrollBehavior) {
@@ -2988,6 +4309,63 @@ function App() {
     updateSet(pickerTarget.setId, pickerTarget.key, pickerValue)
     triggerHaptic(18)
     setPickerTarget(null)
+    setIsPickerKeypadMode(false)
+    setPickerKeypadDraft('')
+  }
+
+  function closePicker() {
+    if (wheelScrollTimerRef.current) {
+      window.clearTimeout(wheelScrollTimerRef.current)
+      wheelScrollTimerRef.current = null
+    }
+    setPickerTarget(null)
+    setIsPickerKeypadMode(false)
+    setPickerKeypadDraft('')
+  }
+
+  function appendPickerKeypadInput(nextInput: string) {
+    setPickerKeypadDraft((previous) => {
+      if (nextInput === '.') {
+        if (previous.includes('.')) {
+          return previous
+        }
+        return previous.length === 0 ? '0.' : `${previous}.`
+      }
+      if (previous === '0') {
+        return nextInput
+      }
+      return `${previous}${nextInput}`
+    })
+  }
+
+  function deletePickerKeypadInput() {
+    setPickerKeypadDraft((previous) => previous.slice(0, -1))
+  }
+
+  function clearPickerKeypadInput() {
+    setPickerKeypadDraft('')
+  }
+
+  function applyPickerKeypadInput() {
+    if (!pickerTarget) {
+      return
+    }
+
+    const parsed = Number(pickerKeypadDraft)
+    if (!Number.isFinite(parsed)) {
+      showToast('数値を入力してください', 'error')
+      return
+    }
+
+    const options = getPickerOptionsForExercise(selectedExercise, pickerTarget.key, pickerStepSettings)
+    const clamped = getNearestOption(options, parsed)
+    setPickerValue(clamped)
+    updateSet(pickerTarget.setId, pickerTarget.key, clamped)
+    triggerHaptic(18)
+    setHasSeenPickerKeypad(true)
+    setIsPickerKeypadMode(false)
+    setPickerKeypadDraft('')
+    setPickerTarget(null)
   }
 
   function adjustRestSeconds(delta: number) {
@@ -3022,6 +4400,89 @@ function App() {
     return
   }
 
+  const restTimerAdjustmentHoldRef = useRef<{
+    pointerId: number
+    delta: number
+    isLongPress: boolean
+    timeoutId: number | null
+    intervalId: number | null
+  } | null>(null)
+
+  function clearRestTimerAdjustmentHold() {
+    const holdState = restTimerAdjustmentHoldRef.current
+    if (!holdState) {
+      return
+    }
+
+    if (holdState.timeoutId !== null) {
+      window.clearTimeout(holdState.timeoutId)
+    }
+    if (holdState.intervalId !== null) {
+      window.clearInterval(holdState.intervalId)
+    }
+
+    restTimerAdjustmentHoldRef.current = null
+  }
+
+  function handleRestTimerAdjustmentPointerDown(delta: number, event: React.PointerEvent<HTMLButtonElement>) {
+    if (timerRunning) {
+      return
+    }
+
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    clearRestTimerAdjustmentHold()
+
+    restTimerAdjustmentHoldRef.current = {
+      pointerId: event.pointerId,
+      delta,
+      isLongPress: false,
+      timeoutId: window.setTimeout(() => {
+        const holdState = restTimerAdjustmentHoldRef.current
+        if (!holdState || holdState.pointerId !== event.pointerId) {
+          return
+        }
+
+        holdState.isLongPress = true
+        adjustRestSeconds(delta)
+        holdState.intervalId = window.setInterval(() => {
+          adjustRestSeconds(delta)
+        }, 120)
+      }, 280),
+      intervalId: null,
+    }
+  }
+
+  function handleRestTimerAdjustmentPointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    const holdState = restTimerAdjustmentHoldRef.current
+    if (!holdState || holdState.pointerId !== event.pointerId) {
+      return
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    if (!holdState.isLongPress) {
+      adjustRestSeconds(holdState.delta)
+    }
+
+    clearRestTimerAdjustmentHold()
+  }
+
+  function handleRestTimerAdjustmentPointerCancel(event: React.PointerEvent<HTMLButtonElement>) {
+    const holdState = restTimerAdjustmentHoldRef.current
+    if (!holdState || holdState.pointerId !== event.pointerId) {
+      return
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    clearRestTimerAdjustmentHold()
+  }
+
   function handleCompleteAction() {
     if (isSavingWorkout) {
       return
@@ -3050,74 +4511,6 @@ function App() {
       setRestTimerNotice(null)
       restTimerNoticeRef.current = null
     }, 3200)
-  }
-
-  function handleRestTimerPointerDown(event: React.PointerEvent<HTMLButtonElement>) {
-    event.currentTarget.setPointerCapture(event.pointerId)
-    restTimerDragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: restTimerOffset.x,
-      originY: restTimerOffset.y,
-      dragged: false,
-    }
-  }
-
-  function handleRestTimerPointerMove(event: React.PointerEvent<HTMLButtonElement>) {
-    const dragState = restTimerDragRef.current
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return
-    }
-
-    const deltaX = event.clientX - dragState.startX
-    const deltaY = event.clientY - dragState.startY
-    const movedEnough = Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10
-    if (movedEnough) {
-      dragState.dragged = true
-    }
-    if (!dragState.dragged) {
-      return
-    }
-
-    const maxX = Math.max(0, window.innerWidth / 2 - 20)
-    const minY = -(window.innerHeight - 20)
-    const maxY = Math.max(24, window.innerHeight - 120)
-    const nextX = Math.max(-maxX, Math.min(maxX, dragState.originX + deltaX))
-    const nextY = Math.max(minY, Math.min(maxY, dragState.originY + deltaY))
-    setRestTimerOffset({ x: nextX, y: nextY })
-  }
-
-  function handleRestTimerPointerUp(event: React.PointerEvent<HTMLButtonElement>) {
-    const dragState = restTimerDragRef.current
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-
-    const shouldToggle = !dragState.dragged
-    restTimerDragRef.current = null
-
-    if (shouldToggle) {
-      triggerHaptic(10)
-      setIsRestTimerExpanded((previous) => !previous)
-      return
-    }
-
-    triggerHaptic(8)
-  }
-
-  function handleRestTimerPointerCancel(event: React.PointerEvent<HTMLButtonElement>) {
-    const dragState = restTimerDragRef.current
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    restTimerDragRef.current = null
   }
 
   function startWorkoutFlow(forceReset = false) {
@@ -3150,7 +4543,7 @@ function App() {
       showToast(`${sessionIds.length}件の履歴を削除しました`)
       setIsDeletingHistory(false)
 
-      if (db && user && !isDemoMode) {
+      if (db && user) {
         const dbRef = db
         const uid = user.uid
         setSyncStatus('クラウド同期中...')
@@ -3214,7 +4607,7 @@ function App() {
       resetCompleteConfirm()
       setIsSavingWorkout(false)
 
-      if (db && user && !isDemoMode) {
+      if (db && user) {
         const dbRef = db
         const uid = user.uid
         setSyncStatus('クラウド同期中...')
@@ -3225,7 +4618,7 @@ function App() {
           .catch(() => {
             queueSessionSave(session)
             setSyncStatus('同期待機中...')
-            showToast('端末には保存済み / 同期失敗を再試行します', 'error')
+            showToast('端末保存済み。クラウド同期は再試行します')
           })
       } else {
         setSyncStatus('ローカル保存')
@@ -3240,7 +4633,6 @@ function App() {
 
   async function logout() {
     if (!auth) {
-      setIsDemoMode(false)
       return
     }
 
@@ -3258,7 +4650,6 @@ function App() {
   } else if (!canUseApp) {
     content = (
       <AuthView
-        onDemoStart={() => setIsDemoMode(true)}
         onLogin={handleAuth}
         onGoogleLogin={handleGoogleLogin}
         onStartPhoneLogin={handleStartPhoneLogin}
@@ -3271,7 +4662,7 @@ function App() {
       <header className="header">
         <h1 className="brand-title">Atlas</h1>
         <div className="header-meta">
-          <p className="header-email">{user?.email ?? 'デモモード'}</p>
+          <p className="header-email">{user?.email ?? ''}</p>
           <p className="sync-badge">{syncStatus}</p>
         </div>
         <button
@@ -3287,10 +4678,22 @@ function App() {
       {tab === 'home' && (
         <section className="home-grid">
           <section className="card home-primary-card">
-            <h2>AIメッセージ</h2>
+            <h2>今日のひとこと</h2>
             <p className="home-ai-main" title={homeAiMessage}>
               {homeAiMessage}
             </p>
+            <p className="home-primary-note">空き日数が長い部位を優先し、すぐワークアウトに入れます。</p>
+            {homeRecommendedBodyPart && (
+              <button
+                type="button"
+                className="home-recommendation"
+                onClick={() => startRecommendedWorkout(homeRecommendedBodyPart.part)}
+              >
+                <span>今日のおすすめ</span>
+                <strong>{homeRecommendedBodyPart.part}</strong>
+                <small>{homeRecommendedBodyPart.label}</small>
+              </button>
+            )}
           </section>
 
           <section className="home-kpi-inline">
@@ -3527,7 +4930,13 @@ function App() {
           )}
 
           {workoutPhase === 'record' && (
-            <div className="step-panel record-step">
+            <>
+              {selectedExercise.trim() === '' ? (
+                <div className="empty-state workout-missing-state">
+                  種目が未選択です。戻るから選び直してください。
+                </div>
+              ) : (
+                <div className="step-panel record-step">
               <div className="record-step-body">
                 <div className="record-metric-pill">
                   <span className={`metric-fixed-badge ${selectedExerciseMetricType === 'time' ? 'time' : 'reps'}`}>
@@ -3617,6 +5026,8 @@ function App() {
                 </button>
               </div>
             </div>
+            )}
+            </>
           )}
         </section>
       )}
@@ -3674,15 +5085,26 @@ function App() {
             <div className="history-calendar-selection">
               <p>{historySelectedDate ? `${dayjs(historySelectedDate).format('M/D')} の履歴` : '日付をタップでその日の詳細を表示'}</p>
               {historySelectedDate && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    triggerHaptic(10)
-                    setHistorySelectedDate(null)
-                  }}
-                >
-                  全日表示
-                </button>
+                <div className="history-calendar-selection-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic(10)
+                      setHistorySelectedDate(null)
+                    }}
+                  >
+                    全日表示
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic(10)
+                      startNewWorkoutDraft(historySelectedDate)
+                    }}
+                  >
+                    追記
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -3861,8 +5283,8 @@ function App() {
                     <small>{section.sessionCount}件 / 総負荷 {section.totalVolume.toLocaleString()}pt</small>
                   </div>
                   <div className="history-date-toggle-state">
-                    <small className={`history-open-badge ${isOpen ? 'open' : ''}`}>{isOpen ? '表示中' : '未表示'}</small>
-                    <span className={`history-toggle-icon ${isOpen ? 'open' : ''}`}>{isOpen ? '−' : '+'}</span>
+                    <small className={`history-toggle-hint ${isOpen ? 'open' : ''}`}>タップ</small>
+                    <span className={`history-toggle-icon ${isOpen ? 'open' : ''}`}>{isOpen ? '▴' : '▾'}</span>
                   </div>
                 </button>
                 <div className="history-date-actions">
@@ -3933,33 +5355,18 @@ function App() {
         <section className="card analytics-screen-card">
           <div className="row analytics-header-row">
             <h2>分析</h2>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => {
+                triggerHaptic(10)
+                setTab('sources')
+              }}
+            >
+              文献
+            </button>
           </div>
-
-          <section className="analytics-ai-summary">
-            <h3>総合サマリー</h3>
-            <div className="analytics-summary-card-grid">
-              {analyticsSummaryCards.map((card) => (
-                <article key={`${card.label}-${card.title}`} className="analytics-summary-card">
-                  <div className="analytics-summary-head">
-                    <span className="analytics-summary-icon" aria-hidden="true">{card.icon}</span>
-                    <div>
-                      <small>{card.label}</small>
-                      <strong>{card.title}</strong>
-                    </div>
-                  </div>
-                  <p>{card.detail}</p>
-                </article>
-              ))}
-            </div>
-            {[...analyticsNarrativeSummary.slice(3), ...analyticsLocalSummary]
-              .slice(0, isProUnlocked ? 4 : 2)
-              .map((text) => (
-              <p key={text} className="feedback-line">・{text}</p>
-            ))}
-            {!isProUnlocked && (
-              <p className="analytics-pro-teaser">Proで詳細サマリーをさらに表示</p>
-            )}
-          </section>
+          <p className="analytics-flow-hint">見る順番: 概況 → 判断 → 次回アクション</p>
 
           <div className="chip-row analytics-period-row">
             <button
@@ -3984,85 +5391,349 @@ function App() {
             </button>
           </div>
 
-          <section className="analytics-ranking-grid">
-            <article className="analytics-ranking-card">
-              <h3>指標伸び率ランキング</h3>
-              {growthRankings.weightTop.slice(0, visibleRankingCount).map((item, index) => (
-                <div key={`weight-${item.name}`} className="analytics-ranking-item">
-                  <div className="analytics-ranking-main">
-                    <strong>{index + 1}. {item.name}</strong>
-                    <small>{item.previousPeakMetric}{item.metricType === 'time' ? '秒' : '回'} → {item.currentPeakMetric}{item.metricType === 'time' ? '秒' : '回'}</small>
-                  </div>
-                  <span>{item.weightGrowthLabel}</span>
-                </div>
-              ))}
-              {growthRankings.weightTop.length - visibleRankingCount > 0 && (
-                <p className="analytics-pro-teaser">+{growthRankings.weightTop.length - visibleRankingCount}件は Pro で解放</p>
-              )}
-              <p className="analytics-ranking-insight">{weightRankingInsight}</p>
-            </article>
+          <div className="chip-row analytics-panel-row">
+            {Object.entries(ANALYTICS_PANEL_TITLES).map(([panel, title]) => (
+              <button
+                key={panel}
+                type="button"
+                className={`chip-button ${analyticsPanel === panel ? 'active' : ''}`}
+                onClick={() => {
+                  triggerHaptic(10)
+                  setAnalyticsPanel(panel as AnalyticsPanel)
+                }}
+              >
+                {title}
+              </button>
+            ))}
+          </div>
 
-            <article className="analytics-ranking-card">
-              <h3>総負荷伸び率ランキング</h3>
-              {growthRankings.volumeTop.slice(0, visibleRankingCount).map((item, index) => (
-                <div key={`volume-${item.name}`} className="analytics-ranking-item">
-                  <div className="analytics-ranking-main">
-                    <strong>{index + 1}. {item.name}</strong>
-                    <small>{item.previousVolume.toLocaleString()}pt → {item.currentVolume.toLocaleString()}pt</small>
-                  </div>
-                  <span>{item.volumeGrowthLabel}</span>
+          <div className="analytics-panels-shell">
+            <div className="analytics-panels">
+              <section
+                ref={(node) => {
+                  analyticsPanelRefs.current.overview = node
+                }}
+                className="analytics-panel"
+              >
+                <div className="analytics-panel-heading">
+                  <span className="badge">1/3</span>
+                  <h3>概況</h3>
                 </div>
-              ))}
-              {growthRankings.volumeTop.length - visibleRankingCount > 0 && (
-                <p className="analytics-pro-teaser">+{growthRankings.volumeTop.length - visibleRankingCount}件は Pro で解放</p>
-              )}
-              <p className="analytics-ranking-insight">{volumeRankingInsight}</p>
-            </article>
-          </section>
 
-          <section className="analytics-insight-grid">
-            <article className="analytics-ranking-card">
-              <h3>疲労・回復アラート</h3>
-              {visibleRecoveryAlerts.map((alert) => (
-                <article key={`${alert.title}-${alert.detail}`} className={`analytics-alert-item ${alert.severity}`}>
-                  <div className="analytics-alert-head">
-                    <span aria-hidden="true">{alert.icon}</span>
-                    <strong>{alert.title}</strong>
+                <section className="analytics-graph-grid">
+                  <article className="analytics-graph-card">
+                    <div className="row">
+                      <h3>負荷トレンド</h3>
+                      <span className="badge">{analyticsVisualSummary.windowLabel}</span>
+                    </div>
+                    <div className="analytics-volume-track">
+                      <div className="analytics-volume-fill" style={{ width: `${analyticsVisualSummary.volumeFill}%` }} />
+                    </div>
+                    <p className="analytics-graph-meta">
+                      今期 {analyticsVisualSummary.currentWindowVolume.toLocaleString()}pt / 前期 {analyticsVisualSummary.previousWindowVolume.toLocaleString()}pt / {analyticsVisualSummary.volumeTrendLabel}
+                    </p>
+                  </article>
+
+                  <article className="analytics-graph-card">
+                    <div className="row">
+                      <h3>部位分布</h3>
+                      <span className="badge">{analyticsVisualSummary.coverageCount}/6</span>
+                    </div>
+                    <div className="analytics-graph-bars">
+                      {analyticsVisualSummary.bodyPartBars.map((item) => (
+                        <div key={item.part} className="analytics-graph-bar">
+                          <span>{item.part}</span>
+                          <div className="analytics-graph-track">
+                            <div className="analytics-graph-fill" style={{ width: `${item.fill}%` }} />
+                          </div>
+                          <strong>{item.count}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                </section>
+
+                <section className="analytics-ranking-grid">
+                  <article className="analytics-ranking-card">
+                    <h3>重量の伸び</h3>
+                    {growthRankings.weightTop.slice(0, visibleRankingCount).map((item, index) => (
+                      <div key={`weight-${item.name}`} className="analytics-ranking-item">
+                        <div className="analytics-ranking-main">
+                          <strong>
+                            {index + 1}. {item.name}
+                          </strong>
+                          <small>
+                            {item.previousPeakMetric}
+                            {item.metricType === 'time' ? '秒' : '回'} → {item.currentPeakMetric}
+                            {item.metricType === 'time' ? '秒' : '回'}
+                          </small>
+                        </div>
+                        <span>{item.weightGrowthLabel}</span>
+                      </div>
+                    ))}
+                    {growthRankings.weightTop.length - visibleRankingCount > 0 && (
+                      <p className="analytics-pro-teaser">+{growthRankings.weightTop.length - visibleRankingCount}件は Pro で解放</p>
+                    )}
+                    <p className="analytics-ranking-insight">{weightRankingInsight}</p>
+                  </article>
+
+                  <article className="analytics-ranking-card">
+                    <h3>総負荷の伸び</h3>
+                    {growthRankings.volumeTop.slice(0, visibleRankingCount).map((item, index) => (
+                      <div key={`volume-${item.name}`} className="analytics-ranking-item">
+                        <div className="analytics-ranking-main">
+                          <strong>
+                            {index + 1}. {item.name}
+                          </strong>
+                          <small>
+                            {item.previousVolume.toLocaleString()}pt → {item.currentVolume.toLocaleString()}pt
+                          </small>
+                        </div>
+                        <span>{item.volumeGrowthLabel}</span>
+                      </div>
+                    ))}
+                    {growthRankings.volumeTop.length - visibleRankingCount > 0 && (
+                      <p className="analytics-pro-teaser">+{growthRankings.volumeTop.length - visibleRankingCount}件は Pro で解放</p>
+                    )}
+                    <p className="analytics-ranking-insight">{volumeRankingInsight}</p>
+                  </article>
+                </section>
+
+                <article className="analytics-ranking-card">
+                  <h3>部位ごとの実施回数</h3>
+                  <div className="analytics-balance-list">
+                    {bodyPartWindowCounts.map((item) => (
+                      <div key={`balance-${item.part}`} className="analytics-balance-row">
+                        <span>{item.part}</span>
+                        <div className="analytics-balance-track">
+                          <div
+                            className="analytics-balance-fill"
+                            style={{ width: `${Math.round((item.count / bodyPartWindowMaxCount) * 100)}%` }}
+                          />
+                        </div>
+                        <strong>{item.count}回</strong>
+                      </div>
+                    ))}
                   </div>
-                  <p>{alert.detail}</p>
+                  <p className="analytics-ranking-insight">{bodyPartWindowCountsInsight}</p>
                 </article>
-              ))}
-              {!isProUnlocked && recoveryAlerts.length - visibleRecoveryAlerts.length > 0 && (
-                <p className="analytics-pro-teaser">+{recoveryAlerts.length - visibleRecoveryAlerts.length}件は Pro で解放</p>
-              )}
-            </article>
-          </section>
+              </section>
+
+              <section
+                ref={(node) => {
+                  analyticsPanelRefs.current.decision = node
+                }}
+                className="analytics-panel"
+              >
+                <div className="analytics-panel-heading">
+                  <span className="badge">2/3</span>
+                  <h3>判断</h3>
+                </div>
+
+                <section className="analytics-ai-summary">
+                  <h3>総合サマリー</h3>
+                  <div className="analytics-summary-card-grid">
+                    {analyticsSummaryCards.map((card) => (
+                      <article key={`${card.label}-${card.title}`} className="analytics-summary-card">
+                        <div className="analytics-summary-head">
+                          <span className="analytics-summary-icon" aria-hidden="true">
+                            {card.icon}
+                          </span>
+                          <div>
+                            <small>{card.label}</small>
+                            <strong>{card.title}</strong>
+                          </div>
+                        </div>
+                        <p>{card.detail}</p>
+                      </article>
+                    ))}
+                  </div>
+                  <h3>コーチメモ</h3>
+                  <div className="analytics-summary-card-grid analytics-coach-card-grid">
+                    {analyticsCoachPlaybook.map((card) => (
+                      <article key={`${card.label}-${card.title}`} className="analytics-summary-card analytics-coach-card">
+                        <div className="analytics-summary-head">
+                          <span className="analytics-summary-icon" aria-hidden="true">
+                            {card.icon}
+                          </span>
+                          <div>
+                            <small>{card.label}</small>
+                            <strong>{card.title}</strong>
+                          </div>
+                        </div>
+                        <p>{card.detail}</p>
+                      </article>
+                    ))}
+                  </div>
+                  {[...analyticsNarrativeSummary.slice(3), ...analyticsLocalSummary]
+                    .slice(0, isProUnlocked ? 4 : 2)
+                    .map((text) => (
+                      <p key={text} className="feedback-line">
+                        ・{text}
+                      </p>
+                    ))}
+                  {!isProUnlocked && <p className="analytics-pro-teaser">Proで詳細サマリーをさらに表示</p>}
+                </section>
+              </section>
+
+              <section
+                ref={(node) => {
+                  analyticsPanelRefs.current.action = node
+                }}
+                className="analytics-panel"
+              >
+                <div className="analytics-panel-heading">
+                  <span className="badge">3/3</span>
+                  <h3>次回アクション</h3>
+                </div>
+
+                <article className="analytics-ranking-card">
+                  <h3>次回の狙い</h3>
+                  <p className="analytics-ranking-insight">
+                    {analyticsDecisionSummary.nextActionLabel}
+                  </p>
+                  <p className="analytics-ranking-insight">{analyticsDecisionSummary.nextActionDetail}</p>
+                  <p className="analytics-ranking-insight">
+                    目的: {analyticsDecisionSummary.goalSummary} / 頻度: {analyticsDecisionSummary.goalFrequencyLabel} / 休憩: {analyticsDecisionSummary.targetRestLabel}
+                  </p>
+                </article>
+
+                <article className="analytics-ranking-card">
+                  <h3>次回の処方箋</h3>
+                  <div className="analytics-prescription-list">
+                    {analyticsBodyPartPrescriptions.map((item) => (
+                      <article key={item.part} className="analytics-prescription-item">
+                        <div className="analytics-prescription-head">
+                          <strong>{item.part}</strong>
+                          <small>{item.exerciseName}</small>
+                        </div>
+                        <p className="analytics-prescription-values">
+                          {item.weight}kg / {item.reps}回 / {item.sets}set
+                        </p>
+                        <p className="analytics-ranking-insight">{item.detail}</p>
+                      </article>
+                    ))}
+                  </div>
+                </article>
+
+                <section className="analytics-insight-grid">
+                  <article className="analytics-ranking-card">
+                    <h3>回復メモ</h3>
+                    {visibleRecoveryAlerts.map((alert) => (
+                      <article key={`${alert.title}-${alert.detail}`} className={`analytics-alert-item ${alert.severity}`}>
+                        <div className="analytics-alert-head">
+                          <span aria-hidden="true">{alert.icon}</span>
+                          <strong>{alert.title}</strong>
+                        </div>
+                        <p>{alert.detail}</p>
+                      </article>
+                    ))}
+                    {!isProUnlocked && recoveryAlerts.length - visibleRecoveryAlerts.length > 0 && (
+                      <p className="analytics-pro-teaser">+{recoveryAlerts.length - visibleRecoveryAlerts.length}件は Pro で解放</p>
+                    )}
+                  </article>
+                </section>
+              </section>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {tab === 'sources' && (
+        <section className="card sources-screen-card">
+          <div className="row analytics-header-row">
+            <h2>文献</h2>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => {
+                triggerHaptic(10)
+                setTab('analytics')
+              }}
+            >
+              戻る
+            </button>
+          </div>
+
+          <div className="sources-hero">
+            <p className="sources-lead">
+              目的に応じて PubMed から最新文献を取得します。分析ページは軽く保ち、詳細な根拠はこちらに集約します。
+            </p>
+            <div className="sources-actions">
+              <span className="sources-goal-badge">{trainingGoal}</span>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => {
+                  triggerHaptic(10)
+                  setLiteratureRefreshTick((previous) => previous + 1)
+                }}
+              >
+                更新
+              </button>
+            </div>
+          </div>
 
           <article className="analytics-ranking-card">
-            <h3>{analyticsWindowDays === 7 ? '直近7日' : '直近30日'}の部位別実施回数</h3>
-            <div className="analytics-balance-list">
-              {bodyPartWindowCounts.map((item) => (
-                <div key={`balance-${item.part}`} className="analytics-balance-row">
-                  <span>{item.part}</span>
-                  <div className="analytics-balance-track">
-                    <div
-                      className="analytics-balance-fill"
-                      style={{ width: `${Math.round((item.count / bodyPartWindowMaxCount) * 100)}%` }}
-                    />
-                  </div>
-                  <strong>{item.count}回</strong>
-                </div>
-              ))}
-            </div>
-            <p className="analytics-ranking-insight">{bodyPartWindowCountsInsight}</p>
+            <h3>いまの検索方針</h3>
+            <p className="analytics-ranking-insight">{getGoalPlan(trainingGoal).summary}</p>
+            <p className="analytics-ranking-insight">
+              週頻度: {getGoalPlan(trainingGoal).frequencyLabel} / 休憩: {getGoalPlan(trainingGoal).restLabel} / 進め方: {getGoalPlan(trainingGoal).progressionLabel}
+            </p>
           </article>
+
+          {isLiteratureLoading ? (
+            <p className="sources-status">最新文献を取得中...</p>
+          ) : literatureError ? (
+            <div className="analytics-ranking-card">
+              <p className="sources-status error">{literatureError}</p>
+              <div className="analytics-source-list">
+                {ANALYTICS_EVIDENCE_SOURCES.map((source) => (
+                  <a
+                    key={source.url}
+                    className="analytics-source-item"
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <strong>{source.title}</strong>
+                    <small>{source.takeaway}</small>
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : (
+            literatureSections.map((section) => (
+              <article key={section.query} className="analytics-ranking-card">
+                <h3>{section.title}</h3>
+                {section.articles.length === 0 ? (
+                  <p className="sources-status">該当文献が見つかりませんでした。</p>
+                ) : (
+                  section.articles.map((article) => (
+                    <a key={article.pmid} className="sources-article" href={article.url} target="_blank" rel="noreferrer">
+                      <div className="analytics-summary-head">
+                        <span className="analytics-summary-icon" aria-hidden="true">📄</span>
+                        <div>
+                          <small>{article.journal} / {article.pubDate}</small>
+                          <strong>{article.title}</strong>
+                        </div>
+                      </div>
+                      <p>{article.snippet}</p>
+                    </a>
+                  ))
+                )}
+              </article>
+            ))
+          )}
+
+          {literatureUpdatedAt && <p className="sources-status">更新時刻: {dayjs(literatureUpdatedAt).format('YYYY/MM/DD HH:mm')}</p>}
         </section>
       )}
 
       {tab === 'settings' && (
-        <section className="card">
+        <section className="card settings-screen">
           <h2>設定</h2>
-          <p>プロフィール: {user?.email ?? 'デモユーザー'}</p>
+          <p>プロフィール: {user?.email ?? '未設定'}</p>
 
           <div className="settings-section">
             <label>
@@ -4083,6 +5754,127 @@ function App() {
             >
               {isProUnlocked ? '課金状態（仮）: ON' : '課金する（仮）'}
             </button>
+          </div>
+
+          <div className="settings-section">
+            <label>
+              <strong>ホイール刻み</strong>
+              <p className="settings-hint">重量・回数・秒数のホイール刻みを自分用に調整できます。</p>
+            </label>
+            <div className="settings-step-grid">
+              <label className="settings-step-row">
+                <span>重量</span>
+                <select
+                  value={pickerStepSettings.weightStep}
+                  onChange={(event) => updatePickerStepSetting('weightStep', Number(event.target.value))}
+                >
+                  {[0.5, 1, 1.25, 2.5, 5].map((step) => (
+                    <option key={step} value={step}>{step}kg</option>
+                  ))}
+                </select>
+              </label>
+              <label className="settings-step-row">
+                <span>回数</span>
+                <select
+                  value={pickerStepSettings.repStep}
+                  onChange={(event) => updatePickerStepSetting('repStep', Number(event.target.value))}
+                >
+                  {[1, 2, 3, 5].map((step) => (
+                    <option key={step} value={step}>{step}回</option>
+                  ))}
+                </select>
+              </label>
+              <label className="settings-step-row">
+                <span>秒数</span>
+                <select
+                  value={pickerStepSettings.durationStep}
+                  onChange={(event) => updatePickerStepSetting('durationStep', Number(event.target.value))}
+                >
+                  {[1, 2, 5, 10, 15].map((step) => (
+                    <option key={step} value={step}>{step}秒</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <label>
+              <strong>体格プロフィール</strong>
+              <p className="settings-hint">身長・体重・年齢を分析に反映して、推定値を少し自分寄りにします。</p>
+            </label>
+            <div className="settings-step-grid">
+              <label className="settings-step-row">
+                <span>身長</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={250}
+                  placeholder="170"
+                  value={bodyProfile.heightCm ?? ''}
+                  onChange={(event) =>
+                    setBodyProfile((previous) => ({
+                      ...previous,
+                      heightCm: event.target.value ? Number(event.target.value) : null,
+                    }))
+                  }
+                />
+              </label>
+              <label className="settings-step-row">
+                <span>体重</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  max={300}
+                  placeholder="65"
+                  value={bodyProfile.weightKg ?? ''}
+                  onChange={(event) =>
+                    setBodyProfile((previous) => ({
+                      ...previous,
+                      weightKg: event.target.value ? Number(event.target.value) : null,
+                    }))
+                  }
+                />
+              </label>
+              <label className="settings-step-row">
+                <span>年齢</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={120}
+                  placeholder="28"
+                  value={bodyProfile.age ?? ''}
+                  onChange={(event) =>
+                    setBodyProfile((previous) => ({
+                      ...previous,
+                      age: event.target.value ? Number(event.target.value) : null,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <label>
+              <strong>トレーニング目的</strong>
+              <p className="settings-hint">筋肥大とダイエットで、頻度・セット数・休憩・出典の見せ方を切り替えます。</p>
+            </label>
+            <div className="settings-step-grid">
+              <label className="settings-step-row">
+                <span>目的</span>
+                <select
+                  value={trainingGoal}
+                  onChange={(event) => setTrainingGoal(normalizeTrainingGoal(event.target.value))}
+                >
+                  <option value="筋肥大">筋肥大</option>
+                  <option value="ダイエット">ダイエット</option>
+                </select>
+              </label>
+            </div>
           </div>
 
           <button type="button" onClick={logout}>
@@ -4213,74 +6005,113 @@ function App() {
             <h3>{pickerTarget.key === 'weight' ? '重量を選択' : pickerTarget.key === 'duration' ? '秒数を選択' : '回数を選択'}</h3>
             <p className="picker-meta">
               {pickerTarget.key === 'weight'
-                ? `${selectedExerciseProfile.weightStep}kg刻み / ${selectedExerciseProfile.weightMin}〜${selectedExerciseProfile.weightMax}kg`
+                ? `${pickerStepSettings.weightStep}kg刻み / ${getExerciseInputProfile(selectedExercise).weightMin}〜${getExerciseInputProfile(selectedExercise).weightMax}kg`
                 : pickerTarget.key === 'duration'
-                  ? `${selectedExerciseProfile.durationStep}秒刻み / ${selectedExerciseProfile.durationMin}〜${selectedExerciseProfile.durationMax}秒`
-                  : `${selectedExerciseProfile.repStep}回刻み / ${selectedExerciseProfile.repMin}〜${selectedExerciseProfile.repMax}回`}
+                  ? `${pickerStepSettings.durationStep}秒刻み / ${getExerciseInputProfile(selectedExercise).durationMin}〜${getExerciseInputProfile(selectedExercise).durationMax}秒`
+                  : `${pickerStepSettings.repStep}回刻み / ${getExerciseInputProfile(selectedExercise).repMin}〜${getExerciseInputProfile(selectedExercise).repMax}回`}
             </p>
-            <div className="wheel-shell">
-              <div className="wheel-window">
-                <div className="wheel-highlight" />
-                <div
-                  ref={wheelListRef}
-                  className="wheel-list"
-                  onScroll={(event) => {
-                    const container = event.currentTarget
-                    const index = Math.round(container.scrollTop / WHEEL_ITEM_HEIGHT)
-                    const clampedIndex = Math.max(0, Math.min(pickerOptions.length - 1, index))
-                    const nextValue = pickerOptions[clampedIndex]
-                    if (typeof nextValue === 'number' && nextValue !== pickerValue) {
-                      setPickerValue(nextValue)
-                      if (nextValue !== lastWheelHapticValueRef.current) {
-                        lastWheelHapticValueRef.current = nextValue
-                        triggerHaptic(10)
-                      }
-                    }
-                    if (wheelScrollTimerRef.current) {
-                      window.clearTimeout(wheelScrollTimerRef.current)
-                    }
-                    wheelScrollTimerRef.current = window.setTimeout(() => {
-                      snapWheelToNearest('smooth')
-                      wheelScrollTimerRef.current = null
-                    }, 90)
-                  }}
-                >
-                  <div style={{ height: `${WHEEL_SIDE_PADDING}px` }} />
-                  {pickerOptions.map((value, index) => (
+            {isPickerKeypadMode ? (
+              <div className="picker-keypad-shell">
+                <div className="picker-keypad-display">
+                  <span>電卓入力</span>
+                  <strong>{pickerKeypadDraft || '0'}</strong>
+                  <small>{pickerTarget.key === 'weight' ? 'kg' : pickerTarget.key === 'duration' ? '秒' : '回'}</small>
+                </div>
+                <div className="picker-keypad-grid">
+                  {['7', '8', '9', '⌫', '4', '5', '6', 'C', '1', '2', '3', '.', '0'].map((key) => (
                     <button
-                      key={value}
+                      key={key}
                       type="button"
-                      className={`wheel-item ${value === pickerValue ? 'selected' : ''}`}
+                      className={`picker-keypad-key ${key === '⌫' || key === 'C' ? 'utility' : ''}`}
                       onClick={() => {
-                        setPickerValue(value)
-                        if (value !== lastWheelHapticValueRef.current) {
-                          lastWheelHapticValueRef.current = value
-                          triggerHaptic(10)
+                        triggerHaptic(8)
+                        if (key === '⌫') {
+                          deletePickerKeypadInput()
+                          return
                         }
-                        scrollWheelToIndex(index, 'smooth')
+                        if (key === 'C') {
+                          clearPickerKeypadInput()
+                          return
+                        }
+                        appendPickerKeypadInput(key)
                       }}
                     >
-                      {value}
+                      {key}
                     </button>
                   ))}
-                  <div style={{ height: `${WHEEL_SIDE_PADDING}px` }} />
                 </div>
-                <span className="wheel-unit">{pickerTarget.key === 'weight' ? 'kg' : pickerTarget.key === 'duration' ? '秒' : '回'}</span>
+                <p className="picker-keypad-hint">初回だけの入力です。次回からは自動でホイールを使います。</p>
               </div>
-            </div>
+            ) : (
+              <div className="wheel-shell">
+                <div className="wheel-window">
+                  <div className="wheel-highlight" />
+                  <div
+                    ref={wheelListRef}
+                    className="wheel-list"
+                    onScroll={(event) => {
+                      const container = event.currentTarget
+                      const index = Math.round(container.scrollTop / WHEEL_ITEM_HEIGHT)
+                      const clampedIndex = Math.max(0, Math.min(pickerOptions.length - 1, index))
+                      const nextValue = pickerOptions[clampedIndex]
+                      if (typeof nextValue === 'number' && nextValue !== pickerValue) {
+                        setPickerValue(nextValue)
+                        if (nextValue !== lastWheelHapticValueRef.current) {
+                          lastWheelHapticValueRef.current = nextValue
+                          triggerHaptic(10)
+                        }
+                      }
+                      if (wheelScrollTimerRef.current) {
+                        window.clearTimeout(wheelScrollTimerRef.current)
+                      }
+                      wheelScrollTimerRef.current = window.setTimeout(() => {
+                        snapWheelToNearest('smooth')
+                        wheelScrollTimerRef.current = null
+                      }, 90)
+                    }}
+                  >
+                    <div style={{ height: `${WHEEL_SIDE_PADDING}px` }} />
+                    {pickerOptions.map((value, index) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`wheel-item ${value === pickerValue ? 'selected' : ''}`}
+                        onClick={() => {
+                          setPickerValue(value)
+                          if (value !== lastWheelHapticValueRef.current) {
+                            lastWheelHapticValueRef.current = value
+                            triggerHaptic(10)
+                          }
+                          scrollWheelToIndex(index, 'smooth')
+                        }}
+                      >
+                        {value}
+                      </button>
+                    ))}
+                    <div style={{ height: `${WHEEL_SIDE_PADDING}px` }} />
+                  </div>
+                  <span className="wheel-unit">{pickerTarget.key === 'weight' ? 'kg' : pickerTarget.key === 'duration' ? '秒' : '回'}</span>
+                </div>
+              </div>
+            )}
             <div className="action-row">
-              <button type="button" onClick={applyWheelPicker}>
+              <button type="button" onClick={isPickerKeypadMode ? applyPickerKeypadInput : applyWheelPicker}>
                 決定
               </button>
               <button
                 type="button"
                 onClick={() => {
+                  triggerHaptic(8)
+                  setIsPickerKeypadMode((previous) => !previous)
+                }}
+              >
+                {isPickerKeypadMode ? 'ホイールへ' : '電卓へ'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
                   triggerHaptic(12)
-                  if (wheelScrollTimerRef.current) {
-                    window.clearTimeout(wheelScrollTimerRef.current)
-                    wheelScrollTimerRef.current = null
-                  }
-                  setPickerTarget(null)
+                  closePicker()
                 }}
               >
                 キャンセル
@@ -4310,14 +6141,22 @@ function App() {
             <strong>{restTimerLabel}</strong>
           </button>
           {isRestTimerExpanded && (
-            <div className="rest-timer-floating-panel">
+            <div ref={restTimerPanelRef} className="rest-timer-floating-panel" style={restTimerPanelStyle}>
               <div className="timer-adjust">
                 <button
                   type="button"
-                  onClick={() => {
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') {
+                      return
+                    }
+                    event.preventDefault()
                     triggerHaptic(10)
                     adjustRestSeconds(-15)
                   }}
+                  onPointerDown={(event) => handleRestTimerAdjustmentPointerDown(-15, event)}
+                  onPointerUp={handleRestTimerAdjustmentPointerUp}
+                  onPointerCancel={handleRestTimerAdjustmentPointerCancel}
+                  onPointerLeave={handleRestTimerAdjustmentPointerCancel}
                   disabled={timerRunning}
                 >
                   －
@@ -4325,10 +6164,18 @@ function App() {
                 <p>{restTimerLabel}</p>
                 <button
                   type="button"
-                  onClick={() => {
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') {
+                      return
+                    }
+                    event.preventDefault()
                     triggerHaptic(10)
                     adjustRestSeconds(15)
                   }}
+                  onPointerDown={(event) => handleRestTimerAdjustmentPointerDown(15, event)}
+                  onPointerUp={handleRestTimerAdjustmentPointerUp}
+                  onPointerCancel={handleRestTimerAdjustmentPointerCancel}
+                  onPointerLeave={handleRestTimerAdjustmentPointerCancel}
                   disabled={timerRunning}
                 >
                   ＋
