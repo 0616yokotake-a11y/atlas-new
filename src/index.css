@@ -35,6 +35,13 @@ textarea {
 }
 
 html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+}
+
+html,
 body {
   height: 100%;
   overscroll-behavior: none;
@@ -45,6 +52,9 @@ body {
   min-height: 100svh;
   overflow-x: hidden;
   overflow-y: hidden;
+  -webkit-text-size-adjust: 100%;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   background:
     radial-gradient(1200px 520px at 8% -12%, rgba(34, 211, 238, 0.16), transparent 74%),
     radial-gradient(1300px 540px at 95% -24%, rgba(56, 189, 248, 0.12), transparent 78%),
@@ -59,6 +69,15 @@ body {
   padding: 0;
   overflow-x: hidden;
   overflow-y: hidden;
+}
+
+.app,
+.auth-screen,
+.loading,
+.error-boundary-shell {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .app,
@@ -1701,6 +1720,43 @@ button.secondary-btn {
   gap: 7px;
 }
 
+.record-metric-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(8, 47, 73, 0.4);
+  border: 1px solid rgba(125, 211, 252, 0.26);
+}
+
+.metric-fixed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: rgba(34, 211, 238, 0.2);
+  color: #bae6fd;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+}
+
+.metric-fixed-badge.time {
+  background: rgba(45, 212, 191, 0.2);
+  color: #99f6e4;
+  border-color: rgba(45, 212, 191, 0.3);
+}
+
+.metric-fixed-helper {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
 .record-step-body {
   display: flex;
   flex-direction: column;
@@ -1727,6 +1783,34 @@ button.secondary-btn {
 
 .custom-exercise-row button {
   min-width: 72px;
+}
+
+.exercise-edit-section {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.exercise-edit-label {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.danger-btn {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.22), rgba(153, 27, 27, 0.26));
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fca5a5;
+}
+
+.danger-btn:active,
+.danger-btn:focus-visible {
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.38), rgba(153, 27, 27, 0.38));
+  border-color: rgba(248, 113, 113, 0.7);
 }
 
 .record-set-list {
@@ -1903,6 +1987,8 @@ button.holding {
   left: 50%;
   bottom: calc(84px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
+  width: min(calc(100% - 24px), 420px);
+  max-width: min(92vw, 420px);
   background: rgba(15, 23, 42, 0.94);
   border: 1px solid rgba(125, 211, 252, 0.34);
   color: #e0f2fe;
@@ -1910,6 +1996,9 @@ button.holding {
   padding: 10px 16px;
   box-shadow: 0 12px 30px rgba(2, 6, 23, 0.35);
   z-index: 90;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: center;
 }
 
 .toast.toast-error {
@@ -2265,6 +2354,24 @@ button.holding {
   color: #cbd5e1;
 }
 
+.error-boundary-shell {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.error-boundary-card {
+  align-items: center;
+  text-align: center;
+  max-width: 420px;
+}
+
+.error-boundary-card p {
+  color: #cbd5e1;
+  margin: 0;
+}
+
 .settings-section {
   display: grid;
   gap: 12px;
@@ -2295,4 +2402,52 @@ button.holding {
 .settings-pro-active {
   border-color: rgba(125, 211, 252, 0.62);
   background: linear-gradient(135deg, rgba(8, 47, 73, 0.52), rgba(30, 64, 175, 0.42));
+}
+
+@media (orientation: landscape) and (max-width: 1024px) {
+  #root {
+    max-width: 960px;
+  }
+
+  .header {
+    width: min(960px, 100%);
+  }
+
+  .app,
+  .auth-screen {
+    padding-inline: clamp(10px, 2vw, 18px);
+    padding-bottom: calc(112px + env(safe-area-inset-bottom));
+  }
+
+  .app.has-fixed-nav {
+    padding-top: calc(86px + env(safe-area-inset-top));
+    padding-bottom: calc(112px + env(safe-area-inset-bottom));
+  }
+
+  .home-single-screen .home-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    grid-template-rows: auto auto;
+    gap: 8px;
+    overflow-y: auto;
+    padding-bottom: 8px;
+  }
+
+  .home-single-screen .home-primary-card {
+    grid-column: 1 / -1;
+  }
+
+  .card {
+    width: 100%;
+    margin-inline: auto;
+  }
+
+  .workout-screen,
+  .history-screen-card,
+  .analytics-screen-card {
+    padding: 10px 12px 10px;
+  }
+
+  .rest-timer-floating {
+    bottom: calc(96px + env(safe-area-inset-bottom));
+  }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   GoogleAuthProvider,
   RecaptchaVerifier,
@@ -14,9 +14,16 @@ import {
 } from 'firebase/auth'
 import dayjs from 'dayjs'
 import { auth, db, isFirebaseConfigured } from './lib/firebase'
-import { BODY_PARTS, EXERCISES_BY_BODY_PART } from './data/catalog'
+import { BODY_PARTS } from './data/catalog'
 import { useAtlasStore } from './store/useAtlasStore'
-import { removeSession, saveSession, subscribeSessions } from './lib/firestoreSync'
+import {
+  queueSessionDelete,
+  queueSessionSave,
+  removeSession,
+  saveSession,
+  subscribeSessions,
+  flushPendingSyncOps,
+} from './lib/firestoreSync'
 import type { BodyPart, ExerciseMetricType, ExerciseSet, WorkoutSession } from './types'
 
 type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'settings'
@@ -58,14 +65,110 @@ const EXERCISE_PREFERENCES_STORAGE_KEY = 'atlas.exercise-preferences.v1'
 const EXERCISE_NOTES_STORAGE_KEY = 'atlas.exercise-notes.v1'
 const CUSTOM_EXERCISES_STORAGE_KEY = 'atlas.custom-exercises.v1'
 const PRO_UNLOCKED_STORAGE_KEY = 'atlas.pro-unlocked.v1'
-const PRESET_EXERCISE_NAMES = new Set(
-  BODY_PARTS.flatMap((bodyPart) => EXERCISES_BY_BODY_PART[bodyPart]),
-)
 const TIME_BASED_EXERCISES = new Set(['プランク', 'サイドプランク'])
+let audioContextInstance: AudioContext | null = null
 
 function triggerHaptic(pattern: number | number[]) {
   if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
     navigator.vibrate(pattern)
+  }
+}
+
+function getAudioContext() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const AudioCtor = window.AudioContext ?? (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AudioCtor) {
+    return null
+  }
+
+  if (!audioContextInstance) {
+    audioContextInstance = new AudioCtor()
+  }
+
+  return audioContextInstance
+}
+
+async function prepareAudioContext() {
+  const ctx = getAudioContext()
+  if (!ctx) {
+    return
+  }
+
+  if (ctx.state === 'suspended') {
+    await ctx.resume()
+  }
+}
+
+function playTimerEndSound() {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+    void prepareAudioContext().then(() => {
+      const beeps = [0, 0.22, 0.44]
+      beeps.forEach((offset) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(880, ctx.currentTime + offset)
+        gain.gain.setValueAtTime(0, ctx.currentTime + offset)
+        gain.gain.linearRampToValueAtTime(0.55, ctx.currentTime + offset + 0.012)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.18)
+        osc.start(ctx.currentTime + offset)
+        osc.stop(ctx.currentTime + offset + 0.18)
+      })
+      window.setTimeout(() => {
+        const closingContext = audioContextInstance
+        audioContextInstance = null
+        void closingContext?.close().catch(() => undefined)
+      }, 1400)
+    })
+  } catch {
+    // Web Audio not supported, skip silently
+  }
+}
+
+function mergeWorkoutSessions(localSessions: WorkoutSession[], remoteSessions: WorkoutSession[]) {
+  const remoteIds = new Set(remoteSessions.map((session) => session.id))
+  const merged = [
+    ...remoteSessions,
+    ...localSessions.filter((session) => !remoteIds.has(session.id)),
+  ]
+
+  return merged.sort((left, right) => dayjs(right.date).valueOf() - dayjs(left.date).valueOf())
+}
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  componentDidCatch() {
+    // Keep the UI safe and readable instead of showing a white crash screen.
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <main className="app error-boundary-shell">
+          <section className="card error-boundary-card">
+            <h2>表示に問題が起きました</h2>
+            <p>少し待ってからもう一度開いてください。必要なら再読み込みしてください。</p>
+            <button type="button" className="secondary-btn" onClick={() => window.location.reload()}>
+              再読み込み
+            </button>
+          </section>
+        </main>
+      )
+    }
+
+    return this.props.children
   }
 }
 
@@ -1051,7 +1154,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [isDemoMode, setIsDemoMode] = useState(false)
   const [selectedBodyPart, setSelectedBodyPart] = useState<BodyPart>('胸')
-  const [selectedExercise, setSelectedExercise] = useState(EXERCISES_BY_BODY_PART.胸[0])
+  const [selectedExercise, setSelectedExercise] = useState('')
   const [workoutPhase, setWorkoutPhase] = useState<WorkoutPhase>('body')
   const [sets, setSets] = useState<ExerciseSet[]>([createSet(0), createSet(1), createSet(2)])
   const [restSeconds, setRestSeconds] = useState(90)
@@ -1073,13 +1176,14 @@ function App() {
   >(loadCustomExercisesByBodyPart)
   const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>(loadExerciseNotes)
   const [exerciseNoteDraft, setExerciseNoteDraft] = useState('')
-  const [authError, setAuthError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
   const [isProUnlocked, setIsProUnlocked] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem(PRO_UNLOCKED_STORAGE_KEY) === '1'
   })
   const [exerciseInfoTarget, setExerciseInfoTarget] = useState<string | null>(null)
+  const [exerciseRenameDraft, setExerciseRenameDraft] = useState('')
+  const [isExerciseDeleteConfirming, setIsExerciseDeleteConfirming] = useState(false)
   const [pickerTarget, setPickerTarget] = useState<{ setId: string; key: PickerTargetKey } | null>(null)
   const [pickerValue, setPickerValue] = useState(0)
   const [isSavingWorkout, setIsSavingWorkout] = useState(false)
@@ -1087,7 +1191,6 @@ function App() {
   const [isRestTimerExpanded, setIsRestTimerExpanded] = useState(false)
   const [restTimerNotice, setRestTimerNotice] = useState<string | null>(null)
   const [restTimerOffset, setRestTimerOffset] = useState({ x: 0, y: 0 })
-  const [isLandscapeBlocked, setIsLandscapeBlocked] = useState(false)
   const [exerciseSetDrafts, setExerciseSetDrafts] = useState<
     Record<string, Array<Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>>>
   >({})
@@ -1109,7 +1212,6 @@ function App() {
     originY: number
     dragged: boolean
   } | null>(null)
-  const suppressRestTimerToggleRef = useRef(false)
   const previousStreakDaysRef = useRef<number | null>(null)
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
   const previousMainTabRef = useRef<MainTab>('home')
@@ -1128,6 +1230,22 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const activateAudioContext = () => {
+      void prepareAudioContext()
+    }
+
+    window.addEventListener('pointerdown', activateAudioContext, { passive: true })
+    window.addEventListener('touchstart', activateAudioContext, { passive: true })
+    window.addEventListener('keydown', activateAudioContext)
+
+    return () => {
+      window.removeEventListener('pointerdown', activateAudioContext)
+      window.removeEventListener('touchstart', activateAudioContext)
+      window.removeEventListener('keydown', activateAudioContext)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!timerRunning) {
       return
     }
@@ -1137,7 +1255,8 @@ function App() {
         if (previous <= 1) {
           window.clearInterval(timer)
           setTimerRunning(false)
-          triggerHaptic([40, 60, 40])
+          triggerHaptic([40, 60, 40, 60, 40])
+          playTimerEndSound()
           showRestTimerNotice('⏱️ 休憩終了！次セットいこう')
           return 0
         }
@@ -1150,7 +1269,7 @@ function App() {
   }, [timerRunning])
 
   useEffect(() => {
-    setSelectedExercise(EXERCISES_BY_BODY_PART[selectedBodyPart][0])
+    setSelectedExercise('')
     setExerciseSearchQuery('')
   }, [selectedBodyPart])
 
@@ -1216,9 +1335,12 @@ function App() {
   useEffect(() => {
     if (!exerciseInfoTarget) {
       setExerciseNoteDraft('')
+      setExerciseRenameDraft('')
+      setIsExerciseDeleteConfirming(false)
       return
     }
     setExerciseNoteDraft(exerciseNotes[exerciseInfoTarget] ?? '')
+    setExerciseRenameDraft(exerciseInfoTarget)
   }, [exerciseInfoTarget, exerciseNotes])
 
   useEffect(() => {
@@ -1247,30 +1369,6 @@ function App() {
       if (wheelScrollTimerRef.current) {
         window.clearTimeout(wheelScrollTimerRef.current)
       }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const mediaQuery = window.matchMedia('(orientation: landscape) and (max-width: 1024px)')
-    const updateOrientationBlock = () => {
-      setIsLandscapeBlocked(mediaQuery.matches)
-    }
-
-    updateOrientationBlock()
-    if (typeof screen !== 'undefined' && 'orientation' in screen && typeof screen.orientation.lock === 'function') {
-      void screen.orientation.lock('portrait').catch(() => undefined)
-    }
-
-    mediaQuery.addEventListener('change', updateOrientationBlock)
-    window.addEventListener('resize', updateOrientationBlock)
-
-    return () => {
-      mediaQuery.removeEventListener('change', updateOrientationBlock)
-      window.removeEventListener('resize', updateOrientationBlock)
     }
   }, [])
 
@@ -1303,15 +1401,47 @@ function App() {
       return
     }
 
+    const activeDb = db
+    const uid = user.uid
+
     setSyncStatus('クラウド同期中...')
-    const unsubscribeSessions = subscribeSessions(db, user.uid, (nextSessions) => {
-      setSessions(nextSessions)
+    const unsubscribeSessions = subscribeSessions(activeDb, uid, (nextSessions) => {
+      const mergedSessions = mergeWorkoutSessions(useAtlasStore.getState().sessions, nextSessions)
+      setSessions(mergedSessions)
       setSyncStatus('クラウド同期済み')
     })
+
+    const flushSyncQueue = () => {
+      void flushPendingSyncOps(activeDb, uid, ({ remaining }) => {
+        if (remaining > 0) {
+          setSyncStatus('クラウド同期待機中...')
+          return
+        }
+        setSyncStatus('クラウド同期済み')
+      })
+    }
+
+    flushSyncQueue()
+
+    const handleOnline = () => {
+      flushSyncQueue()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        flushSyncQueue()
+      }
+    }
+
+    window.addEventListener('online', handleOnline)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
     return () => {
       unsubscribeSessions()
+      window.removeEventListener('online', handleOnline)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [isDemoMode, setSessions, user])
+  }, [db, isDemoMode, setSessions, user])
 
   const canUseApp = Boolean(user) || isDemoMode
 
@@ -1791,27 +1921,13 @@ function App() {
 
   const filteredExercises = useMemo(() => {
     const query = exerciseSearchQuery.trim()
-    const baseExercises = EXERCISES_BY_BODY_PART[selectedBodyPart]
-    const customExercises = Array.from(
+    // All exercises are user-created: combine library list + exercises found in history
+    const allExercises = Array.from(
       new Set([
         ...customExercisesByBodyPart[selectedBodyPart],
-        ...Array.from(exerciseUsageStats.keys()).filter((exercise) => !baseExercises.includes(exercise)),
+        ...Array.from(exerciseUsageStats.keys()),
       ]),
     )
-      .sort((left, right) => {
-        const leftStat = exerciseUsageStats.get(left)
-        const rightStat = exerciseUsageStats.get(right)
-        const countDiff = (rightStat?.count ?? 0) - (leftStat?.count ?? 0)
-        if (countDiff !== 0) {
-          return countDiff
-        }
-        const timeDiff = (rightStat?.lastPerformed ?? 0) - (leftStat?.lastPerformed ?? 0)
-        if (timeDiff !== 0) {
-          return timeDiff
-        }
-        return left.localeCompare(right)
-      })
-    const allExercises = [...baseExercises, ...customExercises]
     const originalIndex = new Map(allExercises.map((exercise, index) => [exercise, index]))
     const sortedExercises = [...allExercises].sort((left, right) => {
       const leftStat = exerciseUsageStats.get(left)
@@ -1942,8 +2058,12 @@ function App() {
   }
 
   const selectedExerciseProfile = useMemo(() => getExerciseInputProfile(selectedExercise), [selectedExercise])
-  const isCustomExerciseInfoTarget = useMemo(
-    () => (exerciseInfoTarget ? !PRESET_EXERCISE_NAMES.has(exerciseInfoTarget) : false),
+  const isInfoTargetInLibrary = useMemo(
+    () => !!exerciseInfoTarget && customExercisesByBodyPart[selectedBodyPart].includes(exerciseInfoTarget),
+    [customExercisesByBodyPart, exerciseInfoTarget, selectedBodyPart],
+  )
+  const hasKnownGuide = useMemo(
+    () => !!exerciseInfoTarget && !!EXERCISE_INFO[exerciseInfoTarget],
     [exerciseInfoTarget],
   )
   const selectedExerciseGuide = useMemo(
@@ -2337,8 +2457,6 @@ function App() {
       throw new Error('Firebase 設定が不足しています。')
     }
 
-    setAuthError(null)
-
     if (mode === 'login') {
       await signInWithEmailAndPassword(auth, email, password)
       return
@@ -2446,33 +2564,6 @@ function App() {
     return exercisePreferences[draftKey]?.restSeconds ?? getExerciseInputProfile(exerciseName).defaultRestSeconds
   }
 
-  function setExerciseMetricType(bodyPart: BodyPart, exerciseName: string, metricType: ExerciseMetricType) {
-    const draftKey = getExerciseDraftKey(bodyPart, exerciseName)
-    const profile = getExerciseInputProfile(exerciseName)
-    setExercisePreferences((previous) => ({
-      ...previous,
-      [draftKey]: {
-        restSeconds: previous[draftKey]?.restSeconds ?? profile.defaultRestSeconds,
-        metricType,
-      },
-    }))
-    setSets((previous) =>
-      previous.map((set) =>
-        metricType === 'time'
-          ? {
-              ...set,
-              reps: set.durationSec ?? Math.max(profile.durationMin, Math.round(set.reps * 5)),
-              durationSec: set.durationSec ?? Math.max(profile.durationMin, Math.round(set.reps * 5)),
-            }
-          : {
-              ...set,
-              reps: set.durationSec ? Math.max(profile.repMin, Math.round(set.durationSec / 5)) : set.reps,
-              durationSec: undefined,
-            },
-      ),
-    )
-  }
-
   function setExercisePreferredRestSeconds(bodyPart: BodyPart, exerciseName: string, rest: number) {
     const draftKey = getExerciseDraftKey(bodyPart, exerciseName)
     setExercisePreferences((previous) => ({
@@ -2517,7 +2608,7 @@ function App() {
 
     setCustomExercisesByBodyPart((previous) => {
       const bodyPartCustoms = previous[selectedBodyPart]
-      if (bodyPartCustoms.includes(name) || EXERCISES_BY_BODY_PART[selectedBodyPart].includes(name)) {
+      if (bodyPartCustoms.includes(name)) {
         return previous
       }
       return {
@@ -2529,6 +2620,75 @@ function App() {
     handleExerciseSelect(name)
     showToast(`「${name}」を追加しました`)
     setCustomExerciseInput('')
+  }
+
+  function renameCustomExercise(oldName: string, newName: string) {
+    const trimmed = newName.trim()
+    if (!trimmed || trimmed === oldName) {
+      showToast('別の名前を入力してください', 'error')
+      return
+    }
+
+    if (customExercisesByBodyPart[selectedBodyPart].includes(trimmed)) {
+      showToast('同じ名前の種目がすでにあります', 'error')
+      return
+    }
+
+    setCustomExercisesByBodyPart((prev) => ({
+      ...prev,
+      [selectedBodyPart]: prev[selectedBodyPart].map((n) => (n === oldName ? trimmed : n)),
+    }))
+
+    if (exerciseNotes[oldName]) {
+      setExerciseNotes((prev) => {
+        const next = { ...prev }
+        next[trimmed] = prev[oldName]
+        delete next[oldName]
+        return next
+      })
+    }
+
+    const oldKey = getExerciseDraftKey(selectedBodyPart, oldName)
+    const newKey = getExerciseDraftKey(selectedBodyPart, trimmed)
+    if (exercisePreferences[oldKey]) {
+      setExercisePreferences((prev) => {
+        const next = { ...prev }
+        next[newKey] = prev[oldKey]
+        delete next[oldKey]
+        return next
+      })
+    }
+
+    if (exerciseSetDrafts[oldKey]) {
+      setExerciseSetDrafts((prev) => {
+        const next = { ...prev }
+        next[newKey] = prev[oldKey]
+        delete next[oldKey]
+        return next
+      })
+    }
+
+    if (selectedExercise === oldName) {
+      setSelectedExercise(trimmed)
+    }
+
+    setExerciseInfoTarget(trimmed)
+    showToast(`「${trimmed}」に名前を変更しました`)
+    triggerHaptic(16)
+  }
+
+  function deleteExerciseFromLibrary(name: string) {
+    setCustomExercisesByBodyPart((prev) => ({
+      ...prev,
+      [selectedBodyPart]: prev[selectedBodyPart].filter((n) => n !== name),
+    }))
+    setIsExerciseDeleteConfirming(false)
+    setExerciseInfoTarget(null)
+    if (selectedExercise === name) {
+      setSelectedExercise('')
+    }
+    showToast(`「${name}」をリストから削除しました`)
+    triggerHaptic(20)
   }
 
   function openWheelPicker(setId: string, key: PickerTargetKey, currentValue: number) {
@@ -2589,6 +2749,7 @@ function App() {
   }
 
   function toggleRestTimerRunning() {
+    void prepareAudioContext()
     triggerHaptic(timerRunning ? 14 : 20)
     resetCompleteConfirm()
     setTimerRunning((previous) => {
@@ -2663,9 +2824,6 @@ function App() {
     const movedEnough = Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10
     if (movedEnough) {
       dragState.dragged = true
-      if (!suppressRestTimerToggleRef.current) {
-        suppressRestTimerToggleRef.current = true
-      }
     }
     if (!dragState.dragged) {
       return
@@ -2687,19 +2845,28 @@ function App() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
-    if (dragState.dragged) {
-      triggerHaptic(8)
-    }
-    restTimerDragRef.current = null
-  }
 
-  function handleRestTimerToggle() {
-    if (suppressRestTimerToggleRef.current) {
-      suppressRestTimerToggleRef.current = false
+    const shouldToggle = !dragState.dragged
+    restTimerDragRef.current = null
+
+    if (shouldToggle) {
+      triggerHaptic(10)
+      setIsRestTimerExpanded((previous) => !previous)
       return
     }
-    triggerHaptic(10)
-    setIsRestTimerExpanded((previous) => !previous)
+
+    triggerHaptic(8)
+  }
+
+  function handleRestTimerPointerCancel(event: React.PointerEvent<HTMLButtonElement>) {
+    const dragState = restTimerDragRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    restTimerDragRef.current = null
   }
 
   function startWorkoutFlow(forceReset = false) {
@@ -2712,7 +2879,6 @@ function App() {
     setWorkoutPhase('body')
     setSets(createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType))
     setExerciseSearchQuery('')
-    setAuthError(null)
     resetCompleteConfirm()
   }
 
@@ -2728,28 +2894,33 @@ function App() {
       setIsHistorySelectionMode(false)
       setIsHistoryDeleteConfirming(false)
       showToast(`${sessionIds.length}件の履歴を削除しました`)
-      setAuthError(null)
       setIsDeletingHistory(false)
 
       if (db && user && !isDemoMode) {
         const dbRef = db
         const uid = user.uid
         setSyncStatus('クラウド同期中...')
-        void Promise.all(sessionIds.map((sessionId) => removeSession(dbRef, uid, sessionId)))
-          .then(() => {
+        void Promise.allSettled(sessionIds.map((sessionId) => removeSession(dbRef, uid, sessionId)))
+          .then((results) => {
+            const failedIds = sessionIds.filter((_, index) => results[index].status === 'rejected')
+            if (failedIds.length > 0) {
+              failedIds.forEach((sessionId) => queueSessionDelete(sessionId))
+              setSyncStatus('同期待機中...')
+              showToast(`${failedIds.length}件の削除を再同期待ちにしました`, 'error')
+              return
+            }
+
             setSyncStatus('クラウド同期済み')
           })
-          .catch((error) => {
+          .catch(() => {
             setSyncStatus('同期エラー')
-            setAuthError(error instanceof Error ? error.message : '履歴削除の同期に失敗しました。')
             showToast('履歴は削除済み / 同期エラー', 'error')
           })
       } else {
         setSyncStatus('ローカル保存')
       }
-    } catch (error) {
+    } catch {
       setSyncStatus('同期エラー')
-      setAuthError(error instanceof Error ? error.message : '履歴削除に失敗しました。')
       showToast('履歴削除に失敗しました', 'error')
       setIsDeletingHistory(false)
     }
@@ -2757,6 +2928,11 @@ function App() {
 
   async function saveWorkout() {
     if (isSavingWorkout) {
+      return
+    }
+
+    if (!selectedExercise.trim()) {
+      showToast('種目を選択してください', 'error')
       return
     }
 
@@ -2769,7 +2945,6 @@ function App() {
       setSets(createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType))
       setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
       setTimerRunning(false)
-      setAuthError(null)
       showToast('保存しました')
       resetCompleteConfirm()
       setIsSavingWorkout(false)
@@ -2782,21 +2957,16 @@ function App() {
           .then(() => {
             setSyncStatus('クラウド同期済み')
           })
-          .catch((error) => {
-            setSyncStatus('同期エラー')
-            setAuthError(
-              error instanceof Error
-                ? `同期に失敗しました。記録は端末に保存済みです。${error.message}`
-                : '同期に失敗しました。記録は端末に保存済みです。',
-            )
-            showToast('端末には保存済み / 同期エラー', 'error')
+          .catch(() => {
+            queueSessionSave(session)
+            setSyncStatus('同期待機中...')
+            showToast('端末には保存済み / 同期失敗を再試行します', 'error')
           })
       } else {
         setSyncStatus('ローカル保存')
       }
-    } catch (error) {
+    } catch {
       setSyncStatus('同期エラー')
-      setAuthError(error instanceof Error ? error.message : 'ワークアウト保存に失敗しました。')
       showToast('保存に失敗しました', 'error')
       resetCompleteConfirm()
       setIsSavingWorkout(false)
@@ -2811,28 +2981,17 @@ function App() {
 
     try {
       await signOut(auth)
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'ログアウトに失敗しました。')
+    } catch {
+      showToast('ログアウトに失敗しました', 'error')
     }
   }
 
+  let content: ReactNode
+
   if (loading) {
-    return <main className="loading">読み込み中...</main>
-  }
-
-  if (isLandscapeBlocked) {
-    return (
-      <main className="orientation-guard">
-        <div className="orientation-guard-card">
-          <h1>縦画面で使ってください</h1>
-          <p>Atlas はスマホ縦持ち専用です。端末を縦に戻すと、そのまま続きから再開できます。</p>
-        </div>
-      </main>
-    )
-  }
-
-  if (!canUseApp) {
-    return (
+    content = <main className="loading">読み込み中...</main>
+  } else if (!canUseApp) {
+    content = (
       <AuthView
         onDemoStart={() => setIsDemoMode(true)}
         onLogin={handleAuth}
@@ -2841,10 +3000,9 @@ function App() {
         onVerifyPhoneCode={handleVerifyPhoneCode}
       />
     )
-  }
-
-  return (
-    <main className={`app has-fixed-nav ${tab === 'home' ? 'home-single-screen' : ''} ${tab === 'workout' ? 'no-scroll' : ''}`}>
+  } else {
+    content = (
+      <main className={`app has-fixed-nav ${tab === 'home' ? 'home-single-screen' : ''} ${tab === 'workout' ? 'no-scroll' : ''}`}>
       <header className="header">
         <h1 className="brand-title">Atlas</h1>
         <div className="header-meta">
@@ -2860,7 +3018,6 @@ function App() {
           ⚙
         </button>
       </header>
-      {authError && <p className="error">{authError}</p>}
 
       {tab === 'home' && (
         <section className="home-grid">
@@ -3086,27 +3243,15 @@ function App() {
           {workoutPhase === 'record' && (
             <div className="step-panel record-step">
               <div className="record-step-body">
-                <div className="chip-row">
-                  <button
-                    type="button"
-                    className={`chip-button ${selectedExerciseMetricType === 'reps' ? 'active' : ''}`}
-                    onClick={() => {
-                      triggerHaptic(10)
-                      setExerciseMetricType(selectedBodyPart, selectedExercise, 'reps')
-                    }}
-                  >
-                    回数
-                  </button>
-                  <button
-                    type="button"
-                    className={`chip-button ${selectedExerciseMetricType === 'time' ? 'active' : ''}`}
-                    onClick={() => {
-                      triggerHaptic(10)
-                      setExerciseMetricType(selectedBodyPart, selectedExercise, 'time')
-                    }}
-                  >
-                    秒
-                  </button>
+                <div className="record-metric-pill">
+                  <span className={`metric-fixed-badge ${selectedExerciseMetricType === 'time' ? 'time' : 'reps'}`}>
+                    {selectedExerciseMetricType === 'time' ? '秒数固定' : '回数固定'}
+                  </span>
+                  <small className="metric-fixed-helper">
+                    {selectedExerciseMetricType === 'time'
+                      ? 'この種目は秒数で記録します。'
+                      : 'この種目は回数で記録します。'}
+                  </small>
                 </div>
                 <div className="previous-set-card">
                   <p className="previous-set-line">
@@ -3607,7 +3752,6 @@ function App() {
         <section className="card">
           <h2>設定</h2>
           <p>プロフィール: {user?.email ?? 'デモユーザー'}</p>
-          {authError && <p className="error">{authError}</p>}
 
           <div className="settings-section">
             <label>
@@ -3651,20 +3795,70 @@ function App() {
                 閉じる
               </button>
             </div>
-            {isCustomExerciseInfoTarget ? (
-              <p className="home-last-workout-empty">
-                この自由入力種目はユーザーメモのみ表示します。
-              </p>
-            ) : (
+
+            {hasKnownGuide ? (
               <>
-                <ExerciseTextGuide exerciseName={exerciseInfoTarget} />
+                <ExerciseTextGuide exerciseName={exerciseInfoTarget!} />
                 <div className="info-copy">
                   <p><strong>姿勢</strong> {selectedExerciseGuide.setup}</p>
                   <p><strong>やり方</strong> {selectedExerciseInfo.method}</p>
                   {selectedExerciseInfo.caution && <p><strong>注意</strong> {selectedExerciseInfo.caution}</p>}
                 </div>
               </>
+            ) : (
+              <p className="empty-state" style={{ padding: '4px 0' }}>ガイドなし（メモで記録できます）</p>
             )}
+
+            {isInfoTargetInLibrary && (
+              <div className="exercise-edit-section">
+                <p className="exercise-edit-label">名前を変更</p>
+                <div className="custom-exercise-row">
+                  <input
+                    value={exerciseRenameDraft}
+                    onChange={(event) => setExerciseRenameDraft(event.target.value)}
+                    placeholder="新しい種目名"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && exerciseInfoTarget) {
+                        renameCustomExercise(exerciseInfoTarget, exerciseRenameDraft)
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => exerciseInfoTarget && renameCustomExercise(exerciseInfoTarget, exerciseRenameDraft)}
+                  >
+                    変更
+                  </button>
+                </div>
+                {isExerciseDeleteConfirming ? (
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      className="danger-btn"
+                      onClick={() => exerciseInfoTarget && deleteExerciseFromLibrary(exerciseInfoTarget)}
+                    >
+                      本当に削除
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsExerciseDeleteConfirming(false)}
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="danger-btn"
+                    onClick={() => { triggerHaptic(12); setIsExerciseDeleteConfirming(true) }}
+                  >
+                    リストから削除
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="exercise-note-editor">
               <label>
                 ユーザーメモ
@@ -3796,11 +3990,10 @@ function App() {
           <button
             type="button"
             className={`rest-timer-fab-toggle ${timerRunning ? 'running' : ''}`}
-            onClick={handleRestTimerToggle}
             onPointerDown={handleRestTimerPointerDown}
             onPointerMove={handleRestTimerPointerMove}
             onPointerUp={handleRestTimerPointerUp}
-            onPointerCancel={handleRestTimerPointerUp}
+            onPointerCancel={handleRestTimerPointerCancel}
           >
             <span>休憩</span>
             <strong>{restTimerLabel}</strong>
@@ -3870,7 +4063,10 @@ function App() {
         </button>
       </nav>
     </main>
-  )
+    )
+  }
+
+  return <AppErrorBoundary>{content}</AppErrorBoundary>
 }
 
 export default App
