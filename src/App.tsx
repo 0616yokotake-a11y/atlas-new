@@ -2129,19 +2129,6 @@ function App() {
   const [literatureError, setLiteratureError] = useState<string | null>(null)
   const [literatureRefreshTick, setLiteratureRefreshTick] = useState(0)
   const analyticsScrollRef = useRef<HTMLDivElement | null>(null)
-  const analyticsSwipeRef = useRef<{
-    pointerId: number | null
-    startX: number
-    startY: number
-    startScrollLeft: number
-    intent: 'idle' | 'pending' | 'horizontal' | 'vertical'
-  }>({
-    pointerId: null,
-    startX: 0,
-    startY: 0,
-    startScrollLeft: 0,
-    intent: 'idle',
-  })
   const analyticsPanelRefs = useRef<Record<AnalyticsPanel, HTMLElement | null>>({
     overview: null,
     decision: null,
@@ -4287,112 +4274,6 @@ function App() {
     resetCompleteConfirm()
   }
 
-  function snapAnalyticsPanelToNearest() {
-    const container = analyticsScrollRef.current
-    if (!container) {
-      return
-    }
-
-    const panelEntries = Object.entries(analyticsPanelRefs.current) as Array<[AnalyticsPanel, HTMLElement | null]>
-    let nearestPanel: AnalyticsPanel = 'overview'
-    let nearestDistance = Number.POSITIVE_INFINITY
-
-    panelEntries.forEach(([panel, node]) => {
-      if (!node) {
-        return
-      }
-      const distance = Math.abs(container.scrollLeft - node.offsetLeft)
-      if (distance < nearestDistance) {
-        nearestDistance = distance
-        nearestPanel = panel
-      }
-    })
-
-    const target = analyticsPanelRefs.current[nearestPanel]
-    if (target) {
-      container.scrollTo({ left: target.offsetLeft, behavior: 'smooth' })
-      setAnalyticsPanel(nearestPanel)
-    }
-  }
-
-  function handleAnalyticsPanelsPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (event.pointerType === 'mouse') {
-      return
-    }
-
-    analyticsSwipeRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startScrollLeft: analyticsScrollRef.current?.scrollLeft ?? 0,
-      intent: 'pending',
-    }
-  }
-
-  function handleAnalyticsPanelsPointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    const state = analyticsSwipeRef.current
-    if (state.pointerId !== event.pointerId || !analyticsScrollRef.current) {
-      return
-    }
-
-    const dx = event.clientX - state.startX
-    const dy = event.clientY - state.startY
-
-    if (state.intent === 'pending') {
-      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-        return
-      }
-
-      state.intent = Math.abs(dx) > Math.abs(dy) * 1.35 ? 'horizontal' : 'vertical'
-      if (state.intent === 'horizontal') {
-        event.currentTarget.setPointerCapture(event.pointerId)
-      }
-    }
-
-    if (state.intent !== 'horizontal') {
-      return
-    }
-
-    event.preventDefault()
-    analyticsScrollRef.current.scrollLeft = state.startScrollLeft - dx * 0.8
-  }
-
-  function resetAnalyticsSwipeState() {
-    analyticsSwipeRef.current = {
-      pointerId: null,
-      startX: 0,
-      startY: 0,
-      startScrollLeft: 0,
-      intent: 'idle',
-    }
-  }
-
-  function handleAnalyticsPanelsPointerUp(event: React.PointerEvent<HTMLDivElement>) {
-    const state = analyticsSwipeRef.current
-    if (state.pointerId !== event.pointerId) {
-      return
-    }
-
-    if (state.intent === 'horizontal') {
-      snapAnalyticsPanelToNearest()
-    }
-
-    resetAnalyticsSwipeState()
-  }
-
-  function handleAnalyticsPanelsPointerCancel(event: React.PointerEvent<HTMLDivElement>) {
-    const state = analyticsSwipeRef.current
-    if (state.pointerId !== event.pointerId) {
-      return
-    }
-
-    if (state.intent === 'horizontal') {
-      snapAnalyticsPanelToNearest()
-    }
-
-    resetAnalyticsSwipeState()
-  }
-
   function handleAnalyticsPanelButtonClick(panel: AnalyticsPanel) {
     triggerHaptic(10)
     setAnalyticsPanel(panel)
@@ -5742,10 +5623,6 @@ function App() {
             <div
               ref={analyticsScrollRef}
               className="analytics-panels"
-              onPointerDown={handleAnalyticsPanelsPointerDown}
-              onPointerMove={handleAnalyticsPanelsPointerMove}
-              onPointerUp={handleAnalyticsPanelsPointerUp}
-              onPointerCancel={handleAnalyticsPanelsPointerCancel}
               onScroll={(event) => {
                 const container = event.currentTarget
                 const panelEntries = Object.entries(analyticsPanelRefs.current) as Array<[AnalyticsPanel, HTMLElement | null]>
