@@ -4339,11 +4339,11 @@ function App() {
     const dy = event.clientY - state.startY
 
     if (state.intent === 'pending') {
-      if (Math.abs(dx) < 14 && Math.abs(dy) < 14) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
         return
       }
 
-      state.intent = Math.abs(dx) > Math.abs(dy) * 2 ? 'horizontal' : 'vertical'
+      state.intent = Math.abs(dx) > Math.abs(dy) * 1.35 ? 'horizontal' : 'vertical'
       if (state.intent === 'horizontal') {
         event.currentTarget.setPointerCapture(event.pointerId)
       }
@@ -4354,7 +4354,7 @@ function App() {
     }
 
     event.preventDefault()
-    analyticsScrollRef.current.scrollLeft = state.startScrollLeft - dx * 0.55
+    analyticsScrollRef.current.scrollLeft = state.startScrollLeft - dx * 0.8
   }
 
   function resetAnalyticsSwipeState() {
@@ -5715,6 +5715,21 @@ function App() {
           </div>
           <p className="analytics-flow-hint">見る順番: 概況 → 判断 → 次回アクション</p>
 
+          <div className="chip-row analytics-panel-row">
+            {Object.entries(ANALYTICS_PANEL_TITLES).map(([panel, title]) => (
+              <button
+                key={panel}
+                type="button"
+                className={`chip-button ${analyticsPanel === panel ? 'active' : ''}`}
+                onClick={() => {
+                  handleAnalyticsPanelButtonClick(panel as AnalyticsPanel)
+                }}
+              >
+                {title}
+              </button>
+            ))}
+          </div>
+
           <div className="analytics-panels-shell">
             <div
               ref={analyticsScrollRef}
@@ -6001,21 +6016,6 @@ function App() {
                 </section>
               </section>
             </div>
-          </div>
-
-          <div className="analytics-panel-fab" aria-label="分析パネル切り替え">
-            {Object.entries(ANALYTICS_PANEL_TITLES).map(([panel, title]) => (
-              <button
-                key={panel}
-                type="button"
-                className={`chip-button ${analyticsPanel === panel ? 'active' : ''}`}
-                onClick={() => {
-                  handleAnalyticsPanelButtonClick(panel as AnalyticsPanel)
-                }}
-              >
-                {title}
-              </button>
-            ))}
           </div>
         </section>
       )}
