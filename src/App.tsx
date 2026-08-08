@@ -2111,20 +2111,12 @@ function App() {
     return map
   }, [representativeExercises])
 
-  const filteredRepresentativeExercises = useMemo(() => {
-    const query = exerciseSearchQuery.trim()
-    if (!query) {
-      return representativeExercises
-    }
-
-    return representativeExercises.filter((exercise) => exercise.name.includes(query))
-  }, [exerciseSearchQuery, representativeExercises])
-
   const filteredExercises = useMemo(() => {
     const query = exerciseSearchQuery.trim()
     // Custom exercises + history suggestions
     const allExercises = Array.from(
       new Set([
+        ...representativeExercises.map((exercise) => exercise.name),
         ...customExercisesByBodyPart[selectedBodyPart],
         ...Array.from(exerciseUsageStats.keys()),
       ]),
@@ -3455,25 +3447,6 @@ function App() {
                 onChange={(event) => setExerciseSearchQuery(event.target.value)}
                 placeholder="種目を検索"
               />
-              <div className="representative-exercise-section">
-                <p className="exercise-edit-label">おすすめ代表種目</p>
-                <div className="representative-exercise-grid">
-                  {filteredRepresentativeExercises.map((exercise) => (
-                    <button
-                      key={exercise.name}
-                      type="button"
-                      className={`representative-exercise-chip ${selectedExercise === exercise.name ? 'active' : ''}`}
-                      onClick={() => {
-                        handleExerciseSelect(exercise.name)
-                        triggerHaptic(20)
-                      }}
-                    >
-                      <span>{exercise.name}</span>
-                      <small>{exercise.metricType === 'time' ? '秒固定' : '回数固定'}</small>
-                    </button>
-                  ))}
-                </div>
-              </div>
               <div className="custom-exercise-row">
                 <input
                   value={customExerciseInput}
@@ -3509,7 +3482,10 @@ function App() {
               </div>
               <div className="exercise-list">
                 {filteredExercises.map((exercise) => (
-                  <div key={exercise} className={`exercise-item ${selectedExercise === exercise ? 'selected' : ''}`}>
+                  <div
+                    key={exercise}
+                    className={`exercise-item ${selectedExercise === exercise ? 'selected' : ''} ${representativeExerciseMetricMap.has(exercise) ? 'representative' : ''}`}
+                  >
                     <button
                       type="button"
                       onClick={() => {
@@ -3532,11 +3508,6 @@ function App() {
                             })()
                           : '最高記録なし'}
                       </small>
-                      {representativeExerciseMetricMap.has(exercise) && (
-                        <small className="representative-badge">
-                          {representativeExerciseMetricMap.get(exercise) === 'time' ? '代表 / 秒固定' : '代表 / 回数固定'}
-                        </small>
-                      )}
                     </button>
                     <button
                       type="button"
@@ -3558,19 +3529,6 @@ function App() {
           {workoutPhase === 'record' && (
             <div className="step-panel record-step">
               <div className="record-step-body">
-                <div className="record-date-row">
-                  <label>
-                    記録日
-                    <input
-                      type="date"
-                      value={sessionDateDraft}
-                      onChange={(event) => setDraftDate(event.target.value)}
-                    />
-                  </label>
-                  <span className="record-date-hint">
-                    {editingSessionId ? '履歴編集モード' : 'あとから日付を直せます'}
-                  </span>
-                </div>
                 <div className="record-metric-pill">
                   <span className={`metric-fixed-badge ${selectedExerciseMetricType === 'time' ? 'time' : 'reps'}`}>
                     {selectedExerciseMetricType === 'time' ? '秒数固定' : '回数固定'}
@@ -3666,7 +3624,7 @@ function App() {
       {tab === 'history' && (
         <section className="card history-screen-card">
           <h2>履歴</h2>
-          <p className="history-affordance-hint">日付をタップで展開、長い一覧は「複数選択削除」からまとめて操作できます。</p>
+          <p className="history-affordance-hint">日付をタップで開く。追記は各日の「追記」から。</p>
           <div className="history-calendar-card">
             <div className="history-calendar-header">
               <button

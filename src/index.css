@@ -537,9 +537,22 @@ button.secondary-btn {
   padding-top: 10px;
 }
 
+.history-item {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(125, 211, 252, 0.12);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.34);
+}
+
 .history-date-group {
-  border-top: 1px solid rgba(71, 85, 105, 0.35);
-  padding-top: 10px;
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  border-radius: 14px;
+  padding: 10px;
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(129, 140, 248, 0.12), transparent 72%),
+    rgba(15, 23, 42, 0.34);
 }
 
 .history-date-toggle {
@@ -557,6 +570,14 @@ button.secondary-btn {
   border-radius: 12px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   position: relative;
+}
+
+.history-date-group + .history-date-group {
+  margin-top: 8px;
+}
+
+.history-date-group .history-date-toggle {
+  border-radius: 12px;
 }
 
 .history-date-toggle.open {
@@ -780,6 +801,7 @@ button.secondary-btn {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  padding-top: 2px;
 }
 
 .history-item-head .secondary-btn {
@@ -856,8 +878,7 @@ button.secondary-btn {
 }
 
 .representative-exercise-section {
-  display: grid;
-  gap: 6px;
+  display: none;
 }
 
 .representative-exercise-grid {
@@ -902,6 +923,15 @@ button.secondary-btn {
   color: #bae6fd;
   background: rgba(8, 47, 73, 0.55);
   border: 1px solid rgba(125, 211, 252, 0.22);
+}
+
+.exercise-item.representative > button {
+  background: linear-gradient(135deg, rgba(8, 47, 73, 0.9), rgba(37, 99, 235, 0.56));
+  border: 1px solid rgba(125, 211, 252, 0.48);
+}
+
+.exercise-item.representative > button .previous-record {
+  color: #dbeafe;
 }
 
 .record-date-row {
@@ -1417,6 +1447,13 @@ button.secondary-btn {
   color: #93c5fd;
   font-size: 0.74rem;
   line-height: 1.4;
+}
+
+.history-affordance-hint {
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(8, 47, 73, 0.18);
+  border: 1px solid rgba(125, 211, 252, 0.14);
 }
 
 .step-panel {
