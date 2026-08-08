@@ -5304,7 +5304,7 @@ function App() {
       {tab === 'history' && (
         <section className="card history-screen-card">
           <h2>履歴</h2>
-          <p className="history-affordance-hint">日付をタップで開く。追記は各日の「追記」から。</p>
+          <p className="history-affordance-hint">日付を開く。追記は各日の「追記」から。</p>
           <div className="history-calendar-card">
             <div className="history-calendar-header">
               <button
@@ -5381,7 +5381,7 @@ function App() {
               <p>
                 {historySelectedDate
                   ? `${dayjs(historySelectedDate).format('M/D')} の履歴（${historySessionsByDate.get(historySelectedDate)?.length ?? 0}件）`
-                  : '日付をタップでその日の詳細を表示'}
+                  : '日付を開くとその日の詳細を表示'}
               </p>
               {historySelectedDate && (
                 <div className="history-calendar-selection-actions">
@@ -5518,8 +5518,8 @@ function App() {
                 </div>
                 <p className="history-selection-helper">
                   {isHistoryDeleteConfirming
-                    ? '確認中：もう一度「削除」をタップで確定'
-                    : '部位/種目チップは複数選択できます。削除したい履歴を選択してから「削除」をタップ'}
+                    ? '確認中：もう一度「削除」を押して確定'
+                    : '部位/種目チップは複数選択できます。削除したい履歴を選択してから「削除」を押してください'}
                 </p>
                 <div className="history-selection-actions">
                   <button
@@ -5582,7 +5582,6 @@ function App() {
                     <small>{section.sessionCount}件 / 総負荷 {section.totalVolume.toLocaleString()}pt</small>
                   </div>
                   <div className="history-date-toggle-state">
-                    <small className={`history-toggle-hint ${isOpen ? 'open' : ''}`}>タップ</small>
                     <span className={`history-toggle-icon ${isOpen ? 'open' : ''}`}>{isOpen ? '▴' : '▾'}</span>
                   </div>
                 </button>
@@ -5646,7 +5645,6 @@ function App() {
                             <div key={exercise.id} className="history-item-exercise">
                               <div className="history-item-exercise-head">
                                 <strong>{exercise.name}</strong>
-                                <small>{metricType === 'time' ? '秒' : '回'}</small>
                               </div>
                               <p>{setSummary}</p>
                             </div>
