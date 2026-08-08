@@ -4411,8 +4411,26 @@ function App() {
 
   const analyticsVisualSummary = useMemo(() => {
     const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
-    const topBodyPart = [...bodyPartWindowCounts].sort((left, right) => right.count - left.count)[0] ?? null
-    const maxBodyPartCount = bodyPartWindowCounts.reduce((max, item) => Math.max(max, item.count), 1)
+    const currentWindowSessions = sessions.filter((session) => {
+      const diff = dayjs().diff(dayjs(session.date), 'day')
+      return diff >= 0 && diff < analyticsWindowDays
+    })
+    const bodyPartLoadBars = BODY_PARTS.map((part) => {
+      const load = currentWindowSessions
+        .filter((session) => session.bodyPart === part)
+        .reduce((sum, session) => {
+          return (
+            sum +
+            session.exercises.reduce((exerciseSum, exercise) => {
+              const metricType = resolveExerciseMetricType(exercise)
+              return exerciseSum + exercise.sets.reduce((setSum, set) => setSum + getExerciseSetVolume(set, metricType), 0)
+            }, 0)
+          )
+        }, 0)
+      return { part, load }
+    })
+    const topBodyPart = [...bodyPartLoadBars].sort((left, right) => right.load - left.load)[0] ?? null
+    const maxBodyPartLoad = bodyPartLoadBars.reduce((max, item) => Math.max(max, item.load), 1)
     const currentFill = previousWindowVolume > 0 ? Math.min(100, Math.max(8, Math.round((currentWindowVolume / Math.max(currentWindowVolume, previousWindowVolume)) * 100))) : 100
     return {
       windowLabel: analyticsWindowDays === 7 ? '直近7日' : '直近30日',
@@ -4426,14 +4444,57 @@ function App() {
           : `${Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100) >= 0 ? '+' : ''}${Math.round(((currentWindowVolume - previousWindowVolume) / previousWindowVolume) * 100)}%`,
       volumeFill: currentFill,
       topBodyPart,
-      maxBodyPartCount,
-      bodyPartBars: bodyPartWindowCounts.map((item) => ({
+      maxBodyPartLoad,
+      bodyPartLoadBars: bodyPartLoadBars.map((item) => ({
         ...item,
-        fill: Math.max(8, Math.round((item.count / maxBodyPartCount) * 100)),
+        fill: Math.max(8, Math.round((item.load / maxBodyPartLoad) * 100)),
       })),
-      coverageCount: bodyPartWindowCounts.filter((item) => item.count > 0).length,
+      coverageCount: bodyPartLoadBars.filter((item) => item.load > 0).length,
     }
-  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, bodyPartWindowCounts, previousWindowVolume])
+  }, [analytics.monthlyTotal, analytics.weeklyTotal, analyticsWindowDays, previousWindowVolume, sessions])
+
+  const analyticsRadarChart = useMemo(() => {
+    const center = 110
+    const axisRadius = 76
+    const labelRadius = 100
+    const ringFractions = [0.34, 0.67, 1]
+    const angleStep = (Math.PI * 2) / BODY_PARTS.length
+    const startAngle = -Math.PI / 2
+
+    const pointAt = (radius: number, angle: number) => ({
+      x: center + Math.cos(angle) * radius,
+      y: center + Math.sin(angle) * radius,
+    })
+
+    const pointString = (radius: number, angle: number) => {
+      const point = pointAt(radius, angle)
+      return `${point.x.toFixed(1)},${point.y.toFixed(1)}`
+    }
+
+    const axisItems = analyticsVisualSummary.bodyPartLoadBars.map((item, index) => {
+      const angle = startAngle + angleStep * index
+      const valueRadius = analyticsVisualSummary.maxBodyPartLoad > 0 ? axisRadius * (item.load / analyticsVisualSummary.maxBodyPartLoad) : 0
+      const valuePoint = pointAt(valueRadius, angle)
+      const labelPoint = pointAt(labelRadius, angle)
+      return {
+        ...item,
+        angle,
+        valueRadius,
+        valuePoint,
+        labelPoint,
+        percent: analyticsVisualSummary.maxBodyPartLoad > 0 ? Math.round((item.load / analyticsVisualSummary.maxBodyPartLoad) * 100) : 0,
+      }
+    })
+
+    return {
+      rings: ringFractions.map((fraction) =>
+        BODY_PARTS.map((_, index) => pointString(axisRadius * fraction, startAngle + angleStep * index)).join(' '),
+      ),
+      axes: axisItems,
+      polygonPoints: axisItems.map((item) => `${item.valuePoint.x.toFixed(1)},${item.valuePoint.y.toFixed(1)}`).join(' '),
+      maxLabel: analyticsVisualSummary.topBodyPart ? `${analyticsVisualSummary.topBodyPart.part} ${analyticsVisualSummary.topBodyPart.load.toLocaleString()}pt` : '記録を蓄積中',
+    }
+  }, [analyticsVisualSummary.bodyPartLoadBars, analyticsVisualSummary.maxBodyPartLoad, analyticsVisualSummary.topBodyPart])
 
   const analyticsSummaryCards = useMemo(() => {
     const currentWindowVolume = analyticsWindowDays === 7 ? analytics.weeklyTotal : analytics.monthlyTotal
@@ -6323,19 +6384,49 @@ function App() {
 
                   <article className="analytics-graph-card">
                     <div className="row">
-                      <h3>部位分布</h3>
-                      <span className="badge">{analyticsVisualSummary.coverageCount}/6</span>
+                      <h3>部位総負荷</h3>
+                      <span className="badge">6軸</span>
                     </div>
-                    <div className="analytics-graph-bars">
-                      {analyticsVisualSummary.bodyPartBars.map((item) => (
-                        <div key={item.part} className="analytics-graph-bar">
-                          <span>{item.part}</span>
-                          <div className="analytics-graph-track">
-                            <div className="analytics-graph-fill" style={{ width: `${item.fill}%` }} />
-                          </div>
-                          <strong>{item.count}</strong>
-                        </div>
-                      ))}
+                    <div className="analytics-radar-card">
+                      <svg className="analytics-radar" viewBox="0 0 220 220" role="img" aria-label="部位ごとの総負荷六角グラフ">
+                        <polygon className="analytics-radar-ring" points={analyticsRadarChart.rings[0]} />
+                        <polygon className="analytics-radar-ring" points={analyticsRadarChart.rings[1]} />
+                        <polygon className="analytics-radar-ring" points={analyticsRadarChart.rings[2]} />
+                        {analyticsRadarChart.axes.map((item) => (
+                          <line
+                            key={`${item.part}-axis`}
+                            className="analytics-radar-axis"
+                            x1="110"
+                            y1="110"
+                            x2={item.labelPoint.x}
+                            y2={item.labelPoint.y}
+                          />
+                        ))}
+                        <polygon className="analytics-radar-fill" points={analyticsRadarChart.polygonPoints} />
+                        {analyticsRadarChart.axes.map((item) => (
+                          <g key={item.part}>
+                            <circle
+                              className="analytics-radar-point"
+                              cx={item.valuePoint.x}
+                              cy={item.valuePoint.y}
+                              r="4"
+                            />
+                            <text
+                              className="analytics-radar-label"
+                              x={item.labelPoint.x}
+                              y={item.labelPoint.y}
+                              textAnchor={item.labelPoint.x < 110 ? 'end' : item.labelPoint.x > 110 ? 'start' : 'middle'}
+                            >
+                              <tspan x={item.labelPoint.x} dy="-0.2em">{item.part}</tspan>
+                              <tspan x={item.labelPoint.x} dy="1.05em">{item.load.toLocaleString()}pt</tspan>
+                            </text>
+                          </g>
+                        ))}
+                      </svg>
+                      <div className="analytics-radar-meta">
+                        <strong>{analyticsVisualSummary.topBodyPart ? analyticsVisualSummary.topBodyPart.part : '記録を蓄積中'}</strong>
+                        <span>{analyticsRadarChart.maxLabel}</span>
+                      </div>
                     </div>
                   </article>
                 </section>
