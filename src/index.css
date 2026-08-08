@@ -2513,7 +2513,16 @@ button.secondary-btn {
 }
 
 .record-step {
-  gap: 7px;
+  gap: 6px;
+}
+
+.record-step .workout-affordance-hint {
+  margin-bottom: 0;
+}
+
+.record-summary-grid {
+  display: grid;
+  gap: 6px;
 }
 
 .record-metric-pill {
@@ -2521,7 +2530,7 @@ button.secondary-btn {
   flex-direction: column;
   gap: 4px;
   align-items: flex-start;
-  padding: 8px 10px;
+  padding: 7px 9px;
   border-radius: 12px;
   background: rgba(8, 47, 73, 0.4);
   border: 1px solid rgba(125, 211, 252, 0.26);
@@ -2532,7 +2541,7 @@ button.secondary-btn {
   align-items: center;
   gap: 4px;
   width: fit-content;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 700;
@@ -2549,17 +2558,95 @@ button.secondary-btn {
 
 .metric-fixed-helper {
   color: #94a3b8;
-  font-size: 0.72rem;
-  line-height: 1.4;
+  font-size: 0.7rem;
+  line-height: 1.35;
 }
 
 .record-step-body {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   flex: 1;
   min-height: 0;
   overflow: visible;
+}
+
+.previous-set-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 12px;
+  background: rgba(8, 47, 73, 0.24);
+  border: 1px solid rgba(125, 211, 252, 0.2);
+}
+
+.previous-set-line {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  color: #bae6fd;
+}
+
+.previous-set-status {
+  color: #93c5fd;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.record-set-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  padding-bottom: 2px;
+}
+
+.record-action-row {
+  margin-top: 0;
+}
+
+.record-action-row button,
+.complete-action-row button {
+  min-height: 42px;
+}
+
+.record-action-row button {
+  min-width: 0;
+  letter-spacing: 0.02em;
+}
+
+.complete-action-row button {
+  min-width: 0;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+}
+
+.set-row-compact {
+  gap: 5px;
+}
+
+.set-row-compact span {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.set-row-compact button {
+  min-height: 34px;
+}
+
+@media (min-width: 420px) {
+  .record-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .record-summary-grid .previous-set-card {
+    min-height: 100%;
+  }
 }
 
 .history-calendar-card {

@@ -5274,27 +5274,29 @@ function App() {
               ) : (
                 <div className="step-panel record-step">
               <div className="record-step-body">
-                <div className="record-metric-pill">
-                  <span className={`metric-fixed-badge ${selectedExerciseMetricType === 'time' ? 'time' : 'reps'}`}>
-                    {selectedExerciseMetricType === 'time' ? '秒数固定' : '回数固定'}
-                  </span>
-                  <small className="metric-fixed-helper">
-                    {selectedExerciseMetricType === 'time'
-                      ? 'この種目は秒数で記録します。'
-                      : 'この種目は回数で記録します。'}
-                  </small>
-                </div>
-                <div className="previous-set-card">
-                  <p className="previous-set-line">
-                    前回セット:
-                    {' '}
-                    {previousExerciseSets.length > 0
-                      ? previousExerciseSets.map((set) => formatSetLabel(set, selectedExerciseMetricType)).join(' / ')
-                      : '記録なし'}
-                  </p>
-                  <span className="previous-set-status">
-                    {previousExerciseSets.length > 0 ? '選択時に自動反映' : '初回は3セットから開始'}
-                  </span>
+                <div className="record-summary-grid">
+                  <div className="record-metric-pill">
+                    <span className={`metric-fixed-badge ${selectedExerciseMetricType === 'time' ? 'time' : 'reps'}`}>
+                      {selectedExerciseMetricType === 'time' ? '秒数固定' : '回数固定'}
+                    </span>
+                    <small className="metric-fixed-helper">
+                      {selectedExerciseMetricType === 'time'
+                        ? 'この種目は秒数で記録します。'
+                        : 'この種目は回数で記録します。'}
+                    </small>
+                  </div>
+                  <div className="previous-set-card">
+                    <p className="previous-set-line">
+                      前回セット:
+                      {' '}
+                      {previousExerciseSets.length > 0
+                        ? previousExerciseSets.map((set) => formatSetLabel(set, selectedExerciseMetricType)).join(' / ')
+                        : '記録なし'}
+                    </p>
+                    <span className="previous-set-status">
+                      {previousExerciseSets.length > 0 ? '選択時に自動反映' : '初回は3セットから開始'}
+                    </span>
+                  </div>
                 </div>
                 <div className="record-set-list">
                   {sets.map((set, index) => (
