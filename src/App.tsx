@@ -3080,36 +3080,35 @@ function App() {
     }
 
     const latest = [...sessions].sort((a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf())[0]
-    const totalSets = latest.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0)
     const totalVolume = getWorkoutSessionVolume(latest)
     const restDays = dayjs().diff(dayjs(latest.date), 'day')
-    const highlights = latest.exercises.slice(0, 2).map((exercise) => {
-      const metricType = resolveExerciseMetricType(exercise)
-      const bestSet = exercise.sets.reduce((best, current) => {
-        if (current.weight > best.weight) {
-          return current
-        }
-        if (current.weight === best.weight && getSetMetricValue(current, metricType) > getSetMetricValue(best, metricType)) {
-          return current
-        }
-        return best
-      }, exercise.sets[0])
-      return {
-        name: exercise.name,
-        bestSetLabel: formatSetLabel(bestSet, metricType),
-        setCount: exercise.sets.length,
-      }
-    })
+    const primaryExercise = getAnchorExercise(latest)
+    const primaryExerciseSummary = primaryExercise
+      ? (() => {
+          const metricType = resolveExerciseMetricType(primaryExercise)
+          const bestSet = primaryExercise.sets.reduce((best, current) => {
+            if (current.weight > best.weight) {
+              return current
+            }
+            if (current.weight === best.weight && getSetMetricValue(current, metricType) > getSetMetricValue(best, metricType)) {
+              return current
+            }
+            return best
+          }, primaryExercise.sets[0])
+          return {
+            name: primaryExercise.name,
+            bestSetLabel: formatSetLabel(bestSet, metricType),
+          }
+        })()
+      : null
 
     return {
       dateLabel: dayjs(latest.date).format('M/D'),
       bodyPart: latest.bodyPart,
       restDaysLabel: restDays === 0 ? '今日実施' : `${restDays}日前`,
       exerciseCount: latest.exercises.length,
-      totalSets,
       totalVolume,
-      highlights,
-      remainingExerciseCount: Math.max(0, latest.exercises.length - highlights.length),
+      primaryExerciseSummary,
     }
   }, [sessions])
 
@@ -3139,17 +3138,6 @@ function App() {
   const previousExerciseSets = useMemo(() => {
     return latestExerciseSetHistory.get(getExerciseDraftKey(selectedBodyPart, selectedExercise)) ?? []
   }, [latestExerciseSetHistory, selectedBodyPart, selectedExercise])
-
-  const homeLastWorkoutVisibleHighlights = useMemo(
-    () => latestSessionSummary?.highlights.slice(0, 1) ?? [],
-    [latestSessionSummary],
-  )
-  const homeLastWorkoutHiddenCount = useMemo(() => {
-    if (!latestSessionSummary) {
-      return 0
-    }
-    return latestSessionSummary.exerciseCount - homeLastWorkoutVisibleHighlights.length
-  }, [homeLastWorkoutVisibleHighlights.length, latestSessionSummary])
 
   const exerciseUsageStats = useMemo(() => {
     const stats = new Map<
@@ -5034,26 +5022,19 @@ function App() {
                     <strong>{latestSessionSummary.exerciseCount}</strong>
                   </p>
                   <p>
-                    <span>セット</span>
-                    <strong>{latestSessionSummary.totalSets}</strong>
-                  </p>
-                  <p>
                     <span>総負荷</span>
                     <strong>{latestSessionSummary.totalVolume.toLocaleString()}pt</strong>
                   </p>
                 </div>
-                <div className="home-last-workout-lines">
-                  {homeLastWorkoutVisibleHighlights.map((item) => (
-                    <p key={item.name}>
-                      <span>{item.name}</span>
-                      <strong>{item.bestSetLabel}</strong>
-                      <small>{item.setCount}セット</small>
+                {latestSessionSummary.primaryExerciseSummary && (
+                  <div className="home-last-workout-lines">
+                    <p>
+                      <span>代表</span>
+                      <strong>{latestSessionSummary.primaryExerciseSummary.name}</strong>
+                      <small>{latestSessionSummary.primaryExerciseSummary.bestSetLabel}</small>
                     </p>
-                  ))}
-                  {homeLastWorkoutHiddenCount > 0 && (
-                    <p className="home-last-workout-more">ほか {homeLastWorkoutHiddenCount} 種目</p>
-                  )}
-                </div>
+                  </div>
+                )}
               </>
             ) : (
               <p className="home-last-workout-empty">履歴が増えると前回内容をここに表示します。</p>
