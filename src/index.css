@@ -215,6 +215,23 @@ body {
     0 6px 14px rgba(15, 23, 42, 0.35);
 }
 
+.sync-badge-button {
+  appearance: none;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sync-badge-button:disabled {
+  cursor: default;
+}
+
+.sync-badge-button:focus-visible {
+  outline: 2px solid rgba(125, 211, 252, 0.8);
+  outline-offset: 2px;
+}
+
 .sync-badge-main {
   display: inline-flex;
   align-items: center;
@@ -1901,7 +1918,7 @@ button.secondary-btn {
 .home-grid {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: clamp(3px, 0.6vh, 7px);
+  gap: clamp(2px, 0.45vh, 5px);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -1909,25 +1926,25 @@ button.secondary-btn {
 }
 
 .home-grid .card {
-  gap: clamp(5px, 0.8vh, 8px);
-  padding: clamp(7px, 0.9vh, 10px);
+  gap: clamp(4px, 0.7vh, 7px);
+  padding: clamp(6px, 0.8vh, 9px);
 }
 
 .home-primary-card {
   border-color: rgba(125, 211, 252, 0.28);
-  gap: 5px;
+  gap: 4px;
 }
 
 .home-primary-card .home-recommendation {
   flex: 1 1 auto;
-  min-height: clamp(58px, 9vh, 76px);
-  padding-block: clamp(8px, 1vh, 12px);
+  min-height: clamp(54px, 8vh, 70px);
+  padding-block: clamp(7px, 0.9vh, 10px);
 }
 
 .home-last-workout-card {
   border-color: rgba(167, 139, 250, 0.28);
   overflow: hidden;
-  padding-bottom: 6px;
+  padding-bottom: 4px;
 }
 
 .home-graph-card {
@@ -1944,7 +1961,7 @@ button.secondary-btn {
 }
 
 .home-grid .mini-chart {
-  min-height: clamp(64px, 11vh, 96px);
+  min-height: clamp(60px, 10vh, 90px);
 }
 
 .home-primary-card h2,
@@ -1956,13 +1973,13 @@ button.secondary-btn {
 .home-kpi-inline {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 5px;
+  gap: 4px;
 }
 
 .kpi-chip {
   margin: 0;
-  padding: 8px 10px;
-  border-radius: 12px;
+  padding: 6px 8px;
+  border-radius: 9px;
   background: rgba(15, 23, 42, 0.5);
   border: 1px solid rgba(125, 211, 252, 0.18);
   display: flex;
@@ -3220,12 +3237,12 @@ button.holding {
 .home-last-workout-kpi {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 4px;
 }
 
 .home-last-workout-kpi p {
   margin: 0;
-  padding: 5px 6px;
+  padding: 4px 5px;
   border-radius: 8px;
   border: 1px solid rgba(125, 211, 252, 0.24);
   background: rgba(30, 41, 59, 0.52);
@@ -3245,14 +3262,14 @@ button.holding {
 }
 
 .home-last-workout-lines {
-  margin-top: 6px;
+  margin-top: 4px;
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .home-last-workout-lines p {
   margin: 0;
-  padding: 6px 7px;
+  padding: 5px 6px;
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.56);
   border: 1px solid rgba(125, 211, 252, 0.16);
@@ -3293,21 +3310,21 @@ button.holding {
 .home-graph-card {
   display: grid;
   grid-template-rows: auto auto auto;
-  min-height: 150px;
+  min-height: 140px;
   overflow: hidden;
-  padding-bottom: 5px;
+  padding-bottom: 4px;
 }
 
 .home-grid .mini-chart {
   height: auto;
-  min-height: 78px;
+  min-height: 72px;
   overflow: hidden;
 }
 
 .home-kpi-inline {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
   margin: 0;
   min-height: 0;
   align-content: stretch;
@@ -3317,8 +3334,8 @@ button.holding {
   margin: 0;
   min-width: 0;
   min-height: 100%;
-  padding: 7px 9px;
-  border-radius: 10px;
+  padding: 6px 8px;
+  border-radius: 9px;
   border: 1px solid rgba(125, 211, 252, 0.26);
   background:
     radial-gradient(120% 120% at 0% 0%, rgba(34, 211, 238, 0.12), transparent 72%),
@@ -3326,7 +3343,7 @@ button.holding {
   display: grid;
   grid-template-rows: auto 1fr;
   align-content: stretch;
-  gap: 5px;
+  gap: 4px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -3577,6 +3594,199 @@ button.holding {
   border-radius: 12px;
   background: rgba(8, 47, 73, 0.24);
   border: 1px solid rgba(125, 211, 252, 0.2);
+}
+
+.settings-sync-section {
+  gap: 10px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-grid label {
+  margin: 0;
+}
+
+.settings-toggle-row {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  color: #e2e8f0;
+  font-size: 0.84rem;
+}
+
+.settings-toggle-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: #38bdf8;
+}
+
+.settings-sync-list {
+  display: grid;
+  gap: 6px;
+}
+
+@media (max-width: 560px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-sync-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.settings-sync-row span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #e0f2fe;
+}
+
+.settings-sync-row strong {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.settings-sync-row.ready {
+  border-color: rgba(74, 222, 128, 0.18);
+}
+
+.settings-sync-row.ready strong {
+  color: #bbf7d0;
+}
+
+.settings-sync-row.pending {
+  border-color: rgba(250, 204, 21, 0.24);
+  background: rgba(120, 53, 15, 0.18);
+}
+
+.settings-sync-row.pending strong {
+  color: #fde68a;
+}
+
+.settings-sync-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-sync-summary {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 0.76rem;
+}
+
+.settings-sync-ready {
+  color: #4ade80;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.settings-sync-retry-btn {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.settings-sync-diagnostics {
+  gap: 10px;
+}
+
+.settings-sync-diagnostic {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.52);
+  border: 1px solid rgba(125, 211, 252, 0.18);
+}
+
+.settings-sync-diagnostic-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-sync-diagnostic-head small {
+  color: #94a3b8;
+  font-size: 0.68rem;
+}
+
+.settings-sync-diagnostic strong {
+  font-size: 0.86rem;
+  color: #f8fafc;
+}
+
+.settings-sync-diagnostic p {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.settings-sync-diagnostic-code {
+  color: #93c5fd;
+}
+
+.settings-sync-diagnostic-hint {
+  color: #e0f2fe;
+}
+
+.settings-sync-diagnostic-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-sync-diagnostic.kind-permission {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.settings-sync-diagnostic.kind-auth {
+  border-color: rgba(250, 204, 21, 0.28);
+}
+
+.settings-sync-diagnostic.kind-timeout,
+.settings-sync-diagnostic.kind-network,
+.settings-sync-diagnostic.kind-unavailable,
+.settings-sync-diagnostic.kind-resource {
+  border-color: rgba(251, 191, 36, 0.24);
+}
+
+.settings-backup-section {
+  gap: 10px;
+}
+
+.settings-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-backup-btn {
+  flex: 1 1 160px;
+}
+
+.settings-backup-input {
+  display: none;
+}
+
+.settings-backup-note {
+  margin: 0;
+  color: #bbf7d0;
+  font-size: 0.76rem;
 }
 
 .settings-screen {

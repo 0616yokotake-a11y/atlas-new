@@ -1,4 +1,4 @@
-import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+﻿import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   GoogleAuthProvider,
   RecaptchaVerifier,
@@ -24,6 +24,11 @@ import {
   getPendingSessionSyncState,
   getPendingCustomExercisesSavePayload,
   getPendingUserSettingsSavePayload,
+  prunePendingSessionSaveOps,
+  removePendingSessionSave,
+  removePendingSessionDelete,
+  removePendingCustomExercisesSave,
+  removePendingUserSettingsSave,
   removeSession,
   saveSession,
   saveCustomExercises,
@@ -32,10 +37,12 @@ import {
   subscribeUserSettings,
   subscribeSessions,
   flushPendingSyncOps,
+  clearPendingSyncOps,
+  getPendingSyncOverview,
   type TrainingGoal,
   type UserSettingsPayload,
 } from './lib/firestoreSync'
-import type { BodyPart, ExerciseMetricType, ExerciseSet, WorkoutSession } from './types'
+import type { BodyPart, ExerciseMetricType, ExerciseSet, MyMenu, WorkoutSession } from './types'
 
 type AppTab = 'home' | 'workout' | 'history' | 'analytics' | 'sources' | 'settings'
 type MainTab = Exclude<AppTab, 'settings'>
@@ -66,6 +73,16 @@ type PickerStepSettings = {
   weightStep: number
   repStep: number
   durationStep: number
+}
+type SyncIssueKind = 'network' | 'permission' | 'auth' | 'timeout' | 'unavailable' | 'resource' | 'unknown'
+type SyncDiagnostics = {
+  at: string
+  target: string
+  kind: SyncIssueKind
+  code: string
+  summary: string
+  detail: string
+  retryHint: string
 }
 type BodyProfile = {
   heightCm: number | null
@@ -117,6 +134,20 @@ type LiteratureSection = {
   query: string
   articles: LiteratureArticle[]
 }
+type AtlasBackupPayload = {
+  version: 1
+  exportedAt: string
+  sessions: WorkoutSession[]
+  myMenus: MyMenu[]
+  customExercisesByBodyPart: Record<BodyPart, string[]>
+  exerciseNotes: Record<string, string>
+  exercisePreferences: Record<string, ExercisePreference>
+  pickerStepSettings: PickerStepSettings
+  bodyProfile: BodyProfile
+  trainingGoal: TrainingGoal
+  hasSeenPickerKeypad: boolean
+  proUnlocked: boolean
+}
 const WHEEL_ITEM_HEIGHT = 54
 const WHEEL_VISIBLE_ROWS = 5
 const WHEEL_SIDE_PADDING = ((WHEEL_VISIBLE_ROWS - 1) / 2) * WHEEL_ITEM_HEIGHT
@@ -131,6 +162,9 @@ const PICKER_KEYPAD_SEEN_STORAGE_KEY = 'atlas.picker-keypad-seen.v1'
 const PRO_UNLOCKED_STORAGE_KEY = 'atlas.pro-unlocked.v1'
 const TRAINING_GOAL_STORAGE_KEY = 'atlas.training-goal.v1'
 const DEFAULT_TRAINING_GOAL: TrainingGoal = '筋肥大'
+const SYNC_WRITE_TIMEOUT_MS = 7000
+const CUSTOM_EXERCISES_SYNC_TIMEOUT_MS = 10000
+const USER_SETTINGS_SYNC_TIMEOUT_MS = 20000
 const ANALYTICS_PANEL_TITLES: Record<AnalyticsPanel, string> = {
   overview: '概況',
   decision: '判断',
@@ -323,6 +357,115 @@ async function prepareAudioContext() {
 
   if (ctx.state === 'suspended') {
     await ctx.resume()
+  }
+}
+
+type SyncWriteHandlers = {
+  onTimeout?: () => void
+  onSuccess?: () => void
+  onFailure?: (error: unknown) => void
+}
+
+function trackSyncWrite<T>(promise: Promise<T>, handlers: SyncWriteHandlers, timeoutMs = SYNC_WRITE_TIMEOUT_MS) {
+  let settled = false
+  const timer = window.setTimeout(() => {
+    if (settled) {
+      return
+    }
+    handlers.onTimeout?.()
+  }, timeoutMs)
+
+  void promise
+    .then(() => {
+      settled = true
+      window.clearTimeout(timer)
+      handlers.onSuccess?.()
+    })
+    .catch((error) => {
+      settled = true
+      window.clearTimeout(timer)
+      handlers.onFailure?.(error)
+    })
+}
+
+function getSyncErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  if (typeof error === 'string') {
+    return error
+  }
+
+  return '不明なエラー'
+}
+
+function classifySyncError(error: unknown, target: string): SyncDiagnostics {
+  const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code ?? '') : ''
+  const codeLower = code.toLowerCase()
+  const message = getSyncErrorMessage(error)
+  const messageLower = message.toLowerCase()
+
+  let kind: SyncIssueKind = 'unknown'
+  let summary = `${target}でエラーが発生しました`
+  let detail = message
+  let retryHint = '少し待ってから再送信してください。'
+
+  if (codeLower.includes('permission-denied')) {
+    kind = 'permission'
+    summary = 'Firestore ルールで拒否されました'
+    detail = '書き込み権限が足りないか、Firestore のルールで止められています。'
+    retryHint = 'ログイン状態と Firestore ルールを確認してください。'
+  } else if (codeLower.includes('unauthenticated') || codeLower.includes('auth/') || messageLower.includes('credential')) {
+    kind = 'auth'
+    summary = '認証が切れています'
+    detail = 'ログイン状態が失効しているか、認証情報の再取得が必要です。'
+    retryHint = 'いったんログアウトして再ログインしてください。'
+  } else if (
+    codeLower.includes('deadline-exceeded') ||
+    codeLower.includes('timeout') ||
+    messageLower.includes('時間内に完了しませんでした')
+  ) {
+    kind = 'timeout'
+    summary = '書き込みが時間切れになりました'
+    detail = 'Firestore への書き込み応答が遅く、アプリ側の待機時間を超えました。'
+    retryHint = '通信状況が良いときに再送信してください。'
+  } else if (
+    codeLower.includes('unavailable') ||
+    codeLower.includes('network-request-failed') ||
+    codeLower.includes('aborted') ||
+    messageLower.includes('network') ||
+    messageLower.includes('offline')
+  ) {
+    kind = 'network'
+    summary = '通信が不安定です'
+    detail = 'Firestore に到達しづらいか、一時的に切断されています。'
+    retryHint = 'Wi-Fi / 回線を切り替えてから再送信してください。'
+  } else if (codeLower.includes('resource-exhausted')) {
+    kind = 'resource'
+    summary = '送信量の制限に当たりました'
+    detail = '短時間に多くの書き込みがあり、Firestore 側の制限に触れている可能性があります。'
+    retryHint = '少し時間を置いてから再送信してください。'
+  } else if (codeLower.includes('failed-precondition')) {
+    kind = 'unavailable'
+    summary = 'Firestore の前提条件を満たしていません'
+    detail = 'インデックスやデータ構造など、Firestore 側の設定不足が疑われます。'
+    retryHint = 'Firestore ルール / インデックス / データ構造を見直してください。'
+  } else if (messageLower.includes('前処理に失敗')) {
+    kind = 'unknown'
+    summary = `${target}の開始処理に失敗しました`
+    detail = message
+    retryHint = 'アプリを再読み込みしてからもう一度試してください。'
+  }
+
+  return {
+    at: new Date().toISOString(),
+    target,
+    kind,
+    code: code || 'no-code',
+    summary,
+    detail,
+    retryHint,
   }
 }
 
@@ -1695,6 +1838,79 @@ function saveUserSettingsSyncSnapshot(snapshot: UserSettingsSnapshot) {
   window.localStorage.setItem(USER_SETTINGS_SYNC_STORAGE_KEY, JSON.stringify(snapshot))
 }
 
+function buildAtlasBackupPayload(state: {
+  sessions: WorkoutSession[]
+  myMenus: MyMenu[]
+  customExercisesByBodyPart: Record<BodyPart, string[]>
+  exerciseNotes: Record<string, string>
+  exercisePreferences: Record<string, ExercisePreference>
+  pickerStepSettings: PickerStepSettings
+  bodyProfile: BodyProfile
+  trainingGoal: TrainingGoal
+  hasSeenPickerKeypad: boolean
+  proUnlocked: boolean
+}): AtlasBackupPayload {
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    sessions: state.sessions,
+    myMenus: state.myMenus,
+    customExercisesByBodyPart: state.customExercisesByBodyPart,
+    exerciseNotes: state.exerciseNotes,
+    exercisePreferences: normalizeExercisePreferences(state.exercisePreferences),
+    pickerStepSettings: state.pickerStepSettings,
+    bodyProfile: state.bodyProfile,
+    trainingGoal: state.trainingGoal,
+    hasSeenPickerKeypad: state.hasSeenPickerKeypad,
+    proUnlocked: state.proUnlocked,
+  }
+}
+
+function normalizeAtlasBackupPayload(payload: unknown): AtlasBackupPayload {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('バックアップファイルの形式が正しくありません。')
+  }
+
+  const data = payload as Partial<AtlasBackupPayload>
+  if (data.version !== 1 || !data.exportedAt) {
+    throw new Error('バックアップのバージョンが一致しません。')
+  }
+
+  return {
+    version: 1,
+    exportedAt: String(data.exportedAt),
+    sessions: Array.isArray(data.sessions) ? (data.sessions as WorkoutSession[]) : [],
+    myMenus: Array.isArray(data.myMenus) ? (data.myMenus as MyMenu[]) : [],
+    customExercisesByBodyPart: normalizeCustomExercisesByBodyPart(
+      data.customExercisesByBodyPart ?? createEmptyCustomExercisesByBodyPart(),
+    ),
+    exerciseNotes: data.exerciseNotes ?? {},
+    exercisePreferences: normalizeExercisePreferences(data.exercisePreferences ?? {}),
+    pickerStepSettings: {
+      weightStep:
+        typeof data.pickerStepSettings?.weightStep === 'number' && data.pickerStepSettings.weightStep > 0
+          ? data.pickerStepSettings.weightStep
+          : DEFAULT_PICKER_STEP_SETTINGS.weightStep,
+      repStep:
+        typeof data.pickerStepSettings?.repStep === 'number' && data.pickerStepSettings.repStep > 0
+          ? data.pickerStepSettings.repStep
+          : DEFAULT_PICKER_STEP_SETTINGS.repStep,
+      durationStep:
+        typeof data.pickerStepSettings?.durationStep === 'number' && data.pickerStepSettings.durationStep > 0
+          ? data.pickerStepSettings.durationStep
+          : DEFAULT_PICKER_STEP_SETTINGS.durationStep,
+    },
+    bodyProfile: {
+      heightCm: typeof data.bodyProfile?.heightCm === 'number' && data.bodyProfile.heightCm > 0 ? data.bodyProfile.heightCm : null,
+      weightKg: typeof data.bodyProfile?.weightKg === 'number' && data.bodyProfile.weightKg > 0 ? data.bodyProfile.weightKg : null,
+      age: typeof data.bodyProfile?.age === 'number' && data.bodyProfile.age > 0 ? data.bodyProfile.age : null,
+    },
+    trainingGoal: normalizeTrainingGoal(data.trainingGoal),
+    hasSeenPickerKeypad: Boolean(data.hasSeenPickerKeypad),
+    proUnlocked: Boolean(data.proUnlocked),
+  }
+}
+
 function loadPickerKeypadSeen() {
   if (typeof window === 'undefined') {
     return false
@@ -2150,6 +2366,8 @@ function App() {
   const [isLiteratureLoading, setIsLiteratureLoading] = useState(false)
   const [literatureError, setLiteratureError] = useState<string | null>(null)
   const [literatureRefreshTick, setLiteratureRefreshTick] = useState(0)
+  const backupFileInputRef = useRef<HTMLInputElement | null>(null)
+  const [backupNotice, setBackupNotice] = useState<string | null>(null)
   const analyticsScrollRef = useRef<HTMLDivElement | null>(null)
   const analyticsPanelRefs = useRef<Record<AnalyticsPanel, HTMLElement | null>>({
     overview: null,
@@ -2162,6 +2380,8 @@ function App() {
   const [isUserSettingsHydrated, setIsUserSettingsHydrated] = useState(false)
   const [exerciseNoteDraft, setExerciseNoteDraft] = useState('')
   const [syncStatus, setSyncStatus] = useState('ローカル保存')
+  const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics | null>(null)
+  const [syncQueueVersion, setSyncQueueVersion] = useState(0)
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine))
   const [isProUnlocked, setIsProUnlocked] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -2211,6 +2431,7 @@ function App() {
   const recaptchaRef = useRef<RecaptchaVerifier | null>(null)
   const previousMainTabRef = useRef<MainTab>('home')
   const [phoneConfirmation, setPhoneConfirmation] = useState<ConfirmationResult | null>(null)
+  const syncRetryLockRef = useRef(false)
   const lastCustomExercisesSyncRef = useRef<Record<BodyPart, string[]>>(
     loadCustomExercisesSyncSnapshot() ?? customExercisesByBodyPart,
   )
@@ -2238,16 +2459,40 @@ function App() {
     bodyProfile,
   })
 
+  function reportSyncFailure(target: string, error: unknown) {
+    const diagnostics = classifySyncError(error, target)
+    setSyncDiagnostics(diagnostics)
+    setSyncStatus('同期エラー')
+    console.error(`Sync failure: ${target}`, error)
+  }
+
+  function clearSyncDiagnosticsIfIdle() {
+    const overview = getPendingSyncOverview()
+    if (overview.totalCount === 0) {
+      setSyncDiagnostics(null)
+    }
+  }
+
   useEffect(() => {
     if (!auth) {
       setLoading(false)
       return
     }
 
-    return onAuthStateChanged(auth, (nextUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser)
       setLoading(false)
     })
+
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    clearPendingSyncOps()
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(CUSTOM_EXERCISES_SYNC_STORAGE_KEY)
+      window.localStorage.removeItem(USER_SETTINGS_SYNC_STORAGE_KEY)
+    }
   }, [])
 
   useEffect(() => {
@@ -2335,7 +2580,7 @@ function App() {
       resetCompleteConfirm()
       setPickerTarget(null)
     }
-  }, [tab])
+  }, [analyticsPanel, tab])
 
   useEffect(() => {
     if (tab !== 'history') {
@@ -2518,7 +2763,7 @@ function App() {
     return () => {
       unsubscribeCustomExercises()
     }
-  }, [db, user])
+  }, [user])
 
   useEffect(() => {
     if (!db || !user || !isCustomExercisesHydrated) {
@@ -2530,24 +2775,37 @@ function App() {
     const payload = normalizeCustomExercisesByBodyPart(currentCustomExercisesRef.current)
     const baseline = lastCustomExercisesSyncRef.current ?? loadCustomExercisesSyncSnapshot()
     const payloadSignature = JSON.stringify(payload)
+    let timedOut = false
 
     if (hasCustomExercisesSyncedRef.current && baseline && payloadSignature === JSON.stringify(baseline)) {
      return
     }
 
-    void saveCustomExercises(activeDb, uid, payload)
-     .then(() => {
+    trackSyncWrite(saveCustomExercises(activeDb, uid, payload), {
+     onTimeout: () => {
+       timedOut = true
+       queueCustomExercisesSave(payload)
+       setSyncStatus('同期待機中...')
+     },
+     onSuccess: () => {
+       removePendingCustomExercisesSave()
        lastCustomExercisesSyncRef.current = payload
        saveCustomExercisesSyncSnapshot(payload)
        hasCustomExercisesSyncedRef.current = true
        setSyncStatus('クラウド同期済み')
-     })
-     .catch(() => {
-        queueCustomExercisesSave(payload)
-        setSyncStatus('同期待機中...')
-        showToast('種目リストの同期に失敗しました。再試行します', 'error')
-      })
-  }, [customExercisesByBodyPart, db, isCustomExercisesHydrated, user])
+       clearSyncDiagnosticsIfIdle()
+     },
+     onFailure: (error) => {
+       if (timedOut) {
+         return
+       }
+       reportSyncFailure('種目ライブラリ', error)
+       queueCustomExercisesSave(payload)
+       setSyncStatus('同期待機中...')
+       showToast('種目リストの同期に失敗しました。再試行します', 'error')
+     },
+    }, CUSTOM_EXERCISES_SYNC_TIMEOUT_MS)
+  }, [customExercisesByBodyPart, isCustomExercisesHydrated, user])
 
   useEffect(() => {
     if (!db || !user) {
@@ -2594,7 +2852,7 @@ function App() {
     return () => {
       unsubscribeUserSettings()
     }
-  }, [db, setMyMenus, user])
+  }, [setMyMenus, user])
 
   useEffect(() => {
     if (!db || !user || !isUserSettingsHydrated) {
@@ -2606,24 +2864,37 @@ function App() {
     const payload = currentUserSettingsRef.current
     const baseline = lastUserSettingsSyncRef.current ?? loadUserSettingsSyncSnapshot()
     const payloadSignature = JSON.stringify(payload)
+    let timedOut = false
 
     if (hasUserSettingsSyncedRef.current && baseline && payloadSignature === JSON.stringify(baseline)) {
       return
     }
 
-    void saveUserSettings(activeDb, uid, payload)
-      .then(() => {
+    trackSyncWrite(saveUserSettings(activeDb, uid, payload), {
+      onTimeout: () => {
+        timedOut = true
+        queueUserSettingsSave(payload)
+        setSyncStatus('同期待機中...')
+      },
+      onSuccess: () => {
+        removePendingUserSettingsSave()
         lastUserSettingsSyncRef.current = payload
         saveUserSettingsSyncSnapshot(payload)
         hasUserSettingsSyncedRef.current = true
         setSyncStatus('クラウド同期済み')
-      })
-      .catch(() => {
+        clearSyncDiagnosticsIfIdle()
+      },
+      onFailure: (error) => {
+        if (timedOut) {
+          return
+        }
+        reportSyncFailure('設定', error)
         queueUserSettingsSave(payload)
         setSyncStatus('同期待機中...')
         showToast('設定の同期に失敗しました。再試行します', 'error')
-      })
-  }, [bodyProfile, db, exerciseNotes, exercisePreferences, isProUnlocked, isUserSettingsHydrated, myMenus, pickerStepSettings, user])
+      },
+    }, USER_SETTINGS_SYNC_TIMEOUT_MS)
+  }, [bodyProfile, exerciseNotes, exercisePreferences, isProUnlocked, isUserSettingsHydrated, myMenus, pickerStepSettings, user])
 
   useEffect(() => {
     if (!exerciseInfoTarget) {
@@ -2697,8 +2968,6 @@ function App() {
 
     const activeDb = db
     const uid = user.uid
-
-    setSyncStatus('クラウド同期中...')
     const unsubscribeSessions = subscribeSessions(activeDb, uid, (nextSessions) => {
       const pendingSessionSyncState = getPendingSessionSyncState()
       const mergedSessions = mergeWorkoutSessions(
@@ -2714,25 +2983,15 @@ function App() {
       )
     })
 
-    const flushSyncQueue = () => {
-      void flushPendingSyncOps(activeDb, uid, ({ remaining }) => {
-        if (remaining > 0) {
-          setSyncStatus('クラウド同期待機中...')
-          return
-        }
-        setSyncStatus('クラウド同期済み')
-      })
-    }
-
-    flushSyncQueue()
+    void flushPendingSyncQueue()
 
     const handleOnline = () => {
-      flushSyncQueue()
+      void flushPendingSyncQueue()
     }
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        flushSyncQueue()
+        void flushPendingSyncQueue()
       }
     }
 
@@ -2744,40 +3003,137 @@ function App() {
       window.removeEventListener('online', handleOnline)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [db, setSessions, user])
+  }, [setSessions, user])
 
   const canUseApp = Boolean(user)
+  const pendingSyncOverview = getPendingSyncOverview()
+  const hasPendingSyncWork = pendingSyncOverview.totalCount > 0
+  const hasBlockedSyncWork = pendingSyncOverview.blockedCount > 0
+  const canRetryPendingSync = Boolean(db && user && isOnline && hasPendingSyncWork)
   const syncBadge = useMemo(() => {
+    if (hasPendingSyncWork) {
+      return {
+        title: hasBlockedSyncWork ? 'この端末で再送信が必要' : 'この端末で同期待機中',
+        detail: hasBlockedSyncWork
+          ? `${pendingSyncOverview.blockedCount}件が再試行上限`
+          : `${pendingSyncOverview.totalCount}件を再送信待ち`,
+        tone: 'pending',
+      }
+    }
+
     const statusTone = syncStatus.includes('同期エラー')
       ? 'error'
-      : syncStatus.includes('同期待機中')
-        ? 'pending'
-        : syncStatus.includes('同期済み')
-          ? 'ready'
-          : 'local'
+      : syncStatus.includes('同期済み')
+        ? 'ready'
+        : 'local'
+
     const title =
       !isOnline && statusTone !== 'error'
         ? 'オフライン保存'
         : statusTone === 'ready'
           ? 'クラウド同期済み'
-          : statusTone === 'pending'
-            ? '同期待機中'
-            : statusTone === 'error'
-              ? '同期エラー'
-              : 'ローカル保存'
+          : statusTone === 'error'
+            ? '同期エラー'
+            : 'ローカル保存'
     const detail =
       !isOnline
         ? 'ネット復帰で同期'
         : statusTone === 'ready'
           ? 'クラウド接続中'
-          : statusTone === 'pending'
-            ? '再同期待ち'
-            : statusTone === 'error'
-              ? '再試行します'
-              : '端末に保存'
+          : statusTone === 'error'
+            ? '再試行します'
+            : '端末に保存'
     const tone = !isOnline ? 'offline' : statusTone
     return { title, detail, tone }
-  }, [isOnline, syncStatus])
+  }, [hasBlockedSyncWork, hasPendingSyncWork, isOnline, pendingSyncOverview.blockedCount, pendingSyncOverview.totalCount, syncStatus])
+
+  async function flushPendingSyncQueue(options: { force?: boolean; announceResult?: boolean } = {}) {
+    if (!db || !user) {
+      return
+    }
+
+    if (syncRetryLockRef.current) {
+      return
+    }
+
+    const force = options.force ?? false
+    const announceResult = options.announceResult ?? false
+    const pendingBeforeRetry = getPendingSyncOverview()
+    const retryTimeoutMs = pendingBeforeRetry.userSettings.pendingCount > 0
+      ? USER_SETTINGS_SYNC_TIMEOUT_MS
+      : pendingBeforeRetry.customExercises.pendingCount > 0
+        ? CUSTOM_EXERCISES_SYNC_TIMEOUT_MS
+        : SYNC_WRITE_TIMEOUT_MS
+    if (pendingBeforeRetry.totalCount === 0) {
+      if (announceResult) {
+        showToast('再送信する待機データはありません')
+      }
+      return
+    }
+
+    if (!isOnline) {
+      if (announceResult) {
+        showToast('オフライン中は再送信できません', 'error')
+      }
+      return
+    }
+
+    syncRetryLockRef.current = true
+    const activeDb = db
+    const uid = user.uid
+    prunePendingSessionSaveOps(sessions.map((session) => session.id))
+    setSyncQueueVersion((previous) => previous + 1)
+    setSyncStatus(force ? '強制再送信中...' : 'クラウド同期中...')
+
+    try {
+      await flushPendingSyncOps(activeDb, uid, ({ remaining }) => {
+        if (remaining > 0) {
+          setSyncStatus(force ? '強制再送信中...' : 'クラウド同期待機中...')
+          return
+        }
+        setSyncStatus('クラウド同期済み')
+      }, { force, timeoutMs: retryTimeoutMs })
+
+      setSyncQueueVersion((previous) => previous + 1)
+
+      if (!announceResult) {
+        return
+      }
+
+      const pendingAfterRetry = getPendingSyncOverview()
+      if (pendingAfterRetry.totalCount === 0) {
+        clearSyncDiagnosticsIfIdle()
+        showToast('同期待ちデータを再送信しました')
+        return
+      }
+
+      if (pendingAfterRetry.blockedCount > 0) {
+        showToast(
+          `${pendingAfterRetry.totalCount}件中${pendingAfterRetry.blockedCount}件は再試行上限にあり、まだ残っています`,
+          'error',
+        )
+        return
+      }
+
+      showToast(`${pendingAfterRetry.totalCount}件はまだ同期待機中です`, 'error')
+    } finally {
+      syncRetryLockRef.current = false
+    }
+  }
+
+  useEffect(() => {
+    if (!db || !user || !isOnline || !hasPendingSyncWork) {
+      return
+    }
+
+    const timer = window.setInterval(() => {
+      void flushPendingSyncQueue()
+    }, 15000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [flushPendingSyncQueue, hasPendingSyncWork, isOnline, syncQueueVersion, user])
 
   const historyMonth = useMemo(() => dayjs(historyMonthCursor), [historyMonthCursor])
 
@@ -4127,8 +4483,11 @@ function App() {
     analytics.weeklyTotal,
     analyticsNarrativeSummary,
     analyticsWindowDays,
+    analyticsDecisionSummary.sessionTrendLabel,
+    analyticsDecisionSummary.topGrowthLabel,
     bodyPartWindowCounts,
     bodyProfileInsight.detail,
+    bodyProfileInsight.nutritionHint,
     bodyProfileInsight.title,
     bodyProfile,
     growthRankings.weightTop,
@@ -4161,6 +4520,16 @@ function App() {
 
   const visibleRankingCount = isProUnlocked ? 5 : 2
   const visibleRecoveryAlerts = isProUnlocked ? recoveryAlerts : recoveryAlerts.slice(0, 1)
+
+  void [
+    syncDiagnostics,
+    applyBodyProfileSettings,
+    applyProSettings,
+    applyPickerStepSettings,
+    applyTrainingGoalSettings,
+    updatePickerStepSetting,
+    logout,
+  ]
 
   async function handleAuth(email: string, password: string, mode: AuthMode) {
     if (!auth) {
@@ -4389,6 +4758,80 @@ function App() {
     saveTrainingGoal(trainingGoal)
     showToast('トレーニング目的を分析と文献に反映しました')
     triggerHaptic(12)
+  }
+
+  function handleExportBackup() {
+    const state = useAtlasStore.getState()
+    const payload = buildAtlasBackupPayload({
+      sessions: state.sessions,
+      myMenus: state.myMenus,
+      customExercisesByBodyPart,
+      exerciseNotes,
+      exercisePreferences,
+      pickerStepSettings,
+      bodyProfile,
+      trainingGoal,
+      hasSeenPickerKeypad,
+      proUnlocked: isProUnlocked,
+    })
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `atlas-backup-${dayjs().format('YYYYMMDD-HHmmss')}.json`
+    link.click()
+    window.URL.revokeObjectURL(url)
+    setBackupNotice('バックアップを書き出しました')
+    showToast('バックアップを保存しました')
+  }
+
+  async function applyBackupFile(file: File) {
+    const raw = await file.text()
+    const parsed = normalizeAtlasBackupPayload(JSON.parse(raw) as unknown)
+    const nextSessions = parsed.sessions
+    const nextMyMenus = parsed.myMenus
+    const nextCustomExercises = parsed.customExercisesByBodyPart
+    const nextExerciseNotes = parsed.exerciseNotes
+    const nextExercisePreferences = parsed.exercisePreferences
+    const nextPickerStepSettings = parsed.pickerStepSettings
+    const nextBodyProfile = parsed.bodyProfile
+    const nextTrainingGoal = parsed.trainingGoal
+    const nextHasSeenPickerKeypad = parsed.hasSeenPickerKeypad
+    const nextProUnlocked = parsed.proUnlocked
+
+    useAtlasStore.getState().setSessions(nextSessions)
+    useAtlasStore.getState().setMyMenus(nextMyMenus)
+    setCustomExercisesByBodyPart(nextCustomExercises)
+    setExerciseNotes(nextExerciseNotes)
+    setExercisePreferences(nextExercisePreferences)
+    setPickerStepSettings(nextPickerStepSettings)
+    setBodyProfile(nextBodyProfile)
+    setTrainingGoal(nextTrainingGoal)
+    setHasSeenPickerKeypad(nextHasSeenPickerKeypad)
+    setIsProUnlocked(nextProUnlocked)
+    saveTrainingGoal(nextTrainingGoal)
+    setBackupNotice(`バックアップを読み込みました (${dayjs(parsed.exportedAt).format('YYYY/MM/DD HH:mm')})`)
+    showToast('バックアップを読み込みました')
+  }
+
+  async function handleImportBackup(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) {
+      return
+    }
+
+    if (!window.confirm('バックアップを読み込むと、現在の端末データが上書きされます。続けますか？')) {
+      return
+    }
+
+    try {
+      await applyBackupFile(file)
+    } catch (error) {
+      console.error('Failed to import backup', error)
+      showToast(error instanceof Error ? error.message : 'バックアップの読み込みに失敗しました', 'error')
+    }
   }
 
   function startPrescriptionWorkout(prescription: {
@@ -4863,6 +5306,12 @@ function App() {
     setIsDeletingHistory(true)
     try {
       sessionIds.forEach((sessionId) => deleteSessionFromStore(sessionId))
+      prunePendingSessionSaveOps(
+        useAtlasStore
+          .getState()
+          .sessions.map((session) => session.id),
+      )
+      setSyncQueueVersion((previous) => previous + 1)
       setSelectedHistoryIds([])
       setIsHistorySelectionMode(false)
       setIsHistoryDeleteConfirming(false)
@@ -4873,27 +5322,35 @@ function App() {
         const dbRef = db
         const uid = user.uid
         setSyncStatus('クラウド同期中...')
-        void Promise.allSettled(sessionIds.map((sessionId) => removeSession(dbRef, uid, sessionId)))
+        void Promise.allSettled(
+          sessionIds.map((sessionId) => removeSession(dbRef, uid, sessionId)),
+        )
           .then((results) => {
             const failedIds = sessionIds.filter((_, index) => results[index].status === 'rejected')
             if (failedIds.length > 0) {
+              const firstFailure = results.find((result) => result.status === 'rejected')
               failedIds.forEach((sessionId) => queueSessionDelete(sessionId))
+              if (firstFailure && firstFailure.status === 'rejected') {
+                reportSyncFailure('履歴削除', firstFailure.reason)
+              }
               setSyncStatus('同期待機中...')
               showToast(`${failedIds.length}件の削除を再同期待ちにしました`, 'error')
               return
             }
 
+            sessionIds.forEach((sessionId) => removePendingSessionDelete(sessionId))
             setSyncStatus('クラウド同期済み')
+            clearSyncDiagnosticsIfIdle()
           })
-          .catch(() => {
-            setSyncStatus('同期エラー')
+          .catch((error) => {
+            reportSyncFailure('履歴削除', error)
             showToast('履歴は削除済み / 同期エラー', 'error')
           })
       } else {
         setSyncStatus('ローカル保存')
       }
     } catch {
-      setSyncStatus('同期エラー')
+      reportSyncFailure('履歴削除', new Error('履歴削除の前処理に失敗しました'))
       showToast('履歴削除に失敗しました', 'error')
       setIsDeletingHistory(false)
     }
@@ -4946,20 +5403,34 @@ function App() {
         const dbRef = db
         const uid = user.uid
         setSyncStatus('クラウド同期中...')
-        void saveSession(dbRef, uid, session)
-          .then(() => {
+        let timedOut = false
+        trackSyncWrite(saveSession(dbRef, uid, session), {
+          onTimeout: () => {
+            timedOut = true
+            queueSessionSave(session)
+            setSyncStatus('同期待機中...')
+            showToast('端末保存済み。クラウド同期は継続中です')
+          },
+          onSuccess: () => {
+            removePendingSessionSave(session.id)
             setSyncStatus('クラウド同期済み')
-          })
-          .catch(() => {
+            clearSyncDiagnosticsIfIdle()
+          },
+          onFailure: (error) => {
+            if (timedOut) {
+              return
+            }
+            reportSyncFailure('記録保存', error)
             queueSessionSave(session)
             setSyncStatus('同期待機中...')
             showToast('端末保存済み。クラウド同期は再試行します')
-          })
+          },
+        })
       } else {
         setSyncStatus('ローカル保存')
       }
     } catch {
-      setSyncStatus('同期エラー')
+      reportSyncFailure('記録保存', new Error('記録保存の前処理に失敗しました'))
       showToast('保存に失敗しました', 'error')
       resetCompleteConfirm()
       setIsSavingWorkout(false)
@@ -4998,13 +5469,30 @@ function App() {
         <h1 className="brand-title">Atlas</h1>
         <div className="header-meta">
           <p className="header-email">{user?.email ?? ''}</p>
-          <p className={`sync-badge tone-${syncBadge.tone}`}>
-            <span className="sync-badge-main">
-              <span className="sync-badge-dot" aria-hidden="true" />
-              <strong>{syncBadge.title}</strong>
-            </span>
-            <small>{syncBadge.detail}</small>
-          </p>
+          {canRetryPendingSync ? (
+            <button
+              type="button"
+              className={`sync-badge sync-badge-button tone-${syncBadge.tone}`}
+              onClick={() => {
+                void flushPendingSyncQueue({ force: hasBlockedSyncWork, announceResult: true })
+              }}
+              aria-label={`同期の再送信。${pendingSyncOverview.totalCount}件の待機データがあります。`}
+            >
+              <span className="sync-badge-main">
+                <span className="sync-badge-dot" aria-hidden="true" />
+                <strong>{syncBadge.title}</strong>
+              </span>
+              <small>{syncBadge.detail}</small>
+            </button>
+          ) : (
+            <p className={`sync-badge tone-${syncBadge.tone}`}>
+              <span className="sync-badge-main">
+                <span className="sync-badge-dot" aria-hidden="true" />
+                <strong>{syncBadge.title}</strong>
+              </span>
+              <small>{syncBadge.detail}</small>
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -6145,163 +6633,170 @@ function App() {
           <h2>設定</h2>
           <p>プロフィール: {user?.email ?? '未設定'}</p>
 
-          <div className="settings-section">
+          <div className="settings-section settings-backup-section">
             <label>
-              <strong>Pro版（仮）</strong>
-              <p className="settings-hint">
-                無料版は一部コンテンツを制限し、Pro版（仮）で詳細サマリー・ランキング表示件数・疲労アラート件数を解放します。
-              </p>
+              <strong>バックアップ</strong>
+              <p className="settings-hint">端末の記録・設定・自作種目を JSON で書き出し / 読み込みできます。</p>
             </label>
-            <button
-              type="button"
-              className={`secondary-btn ${isProUnlocked ? 'settings-pro-active' : ''}`}
-              onClick={() => {
-                const next = !isProUnlocked
-                setIsProUnlocked(next)
-                window.localStorage.setItem(PRO_UNLOCKED_STORAGE_KEY, next ? '1' : '0')
-                showToast(next ? 'Pro版（仮）を有効化しました' : 'Pro版（仮）を解除しました')
-              }}
-            >
-              {isProUnlocked ? '課金状態（仮）: ON' : '課金する（仮）'}
-            </button>
-            <button type="button" className="secondary-btn settings-apply-btn" onClick={applyProSettings}>
-              Pro設定を反映する
-            </button>
-          </div>
-
-          <div className="settings-section">
-            <label>
-              <strong>ホイール刻み</strong>
-              <p className="settings-hint">重量・回数・秒数のホイール刻みを自分用に調整できます。</p>
-            </label>
-            <div className="settings-step-grid">
-              <label className="settings-step-row">
-                <span>重量</span>
-                <select
-                  value={pickerStepSettings.weightStep}
-                  onChange={(event) => updatePickerStepSetting('weightStep', Number(event.target.value))}
-                >
-                  {[0.5, 1, 1.25, 2.5, 5].map((step) => (
-                    <option key={step} value={step}>{step}kg</option>
-                  ))}
-                </select>
-              </label>
-              <label className="settings-step-row">
-                <span>回数</span>
-                <select
-                  value={pickerStepSettings.repStep}
-                  onChange={(event) => updatePickerStepSetting('repStep', Number(event.target.value))}
-                >
-                  {[1, 2, 3, 5].map((step) => (
-                    <option key={step} value={step}>{step}回</option>
-                  ))}
-                </select>
-              </label>
-              <label className="settings-step-row">
-                <span>秒数</span>
-                <select
-                  value={pickerStepSettings.durationStep}
-                  onChange={(event) => updatePickerStepSetting('durationStep', Number(event.target.value))}
-                >
-                  {[1, 2, 5, 10, 15].map((step) => (
-                    <option key={step} value={step}>{step}秒</option>
-                  ))}
-                </select>
-              </label>
+            <div className="settings-backup-actions">
+              <button type="button" className="secondary-btn settings-backup-btn" onClick={handleExportBackup}>
+                JSONを書き出す
+              </button>
+              <button
+                type="button"
+                className="secondary-btn settings-backup-btn"
+                onClick={() => backupFileInputRef.current?.click()}
+              >
+                JSONを読み込む
+              </button>
+              <input
+                ref={backupFileInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="settings-backup-input"
+                onChange={(event) => {
+                  void handleImportBackup(event)
+                }}
+              />
             </div>
-            <button type="button" className="secondary-btn settings-apply-btn" onClick={applyPickerStepSettings}>
-              刻みを反映する
-            </button>
+            <p className="settings-sync-summary">クラウドなしで、端末間の引っ越しや保険用の保存ができます。</p>
+            {backupNotice && <p className="settings-backup-note">{backupNotice}</p>}
           </div>
 
           <div className="settings-section">
             <label>
               <strong>体格プロフィール</strong>
-              <p className="settings-hint">身長・体重・年齢を分析に反映して、推定値を少し自分寄りにします。</p>
+              <p className="settings-hint">分析と処方箋に反映するための基本情報です。</p>
             </label>
-            <div className="settings-step-grid">
-              <label className="settings-step-row">
-                <span>身長</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  max={250}
-                  placeholder="170"
-                  value={bodyProfile.heightCm ?? ''}
-                  onChange={(event) =>
-                    setBodyProfile((previous) => ({
-                      ...previous,
-                      heightCm: event.target.value ? Number(event.target.value) : null,
-                    }))
-                  }
-                />
-              </label>
-              <label className="settings-step-row">
-                <span>体重</span>
+            <div className="settings-grid">
+              <label>
+                身長(cm)
                 <input
                   type="number"
                   inputMode="decimal"
-                  min={0}
-                  max={300}
-                  placeholder="65"
-                  value={bodyProfile.weightKg ?? ''}
-                  onChange={(event) =>
-                    setBodyProfile((previous) => ({
-                      ...previous,
-                      weightKg: event.target.value ? Number(event.target.value) : null,
-                    }))
-                  }
+                  value={bodyProfile.heightCm ?? ''}
+                  onChange={(event) => {
+                    const next = event.target.value === '' ? null : Number(event.target.value)
+                    setBodyProfile((previous) => ({ ...previous, heightCm: Number.isFinite(next) ? next : null }))
+                  }}
+                  placeholder="170"
                 />
               </label>
-              <label className="settings-step-row">
-                <span>年齢</span>
+              <label>
+                体重(kg)
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={bodyProfile.weightKg ?? ''}
+                  onChange={(event) => {
+                    const next = event.target.value === '' ? null : Number(event.target.value)
+                    setBodyProfile((previous) => ({ ...previous, weightKg: Number.isFinite(next) ? next : null }))
+                  }}
+                  placeholder="65"
+                />
+              </label>
+              <label>
+                年齢
                 <input
                   type="number"
                   inputMode="numeric"
-                  min={0}
-                  max={120}
-                  placeholder="28"
                   value={bodyProfile.age ?? ''}
-                  onChange={(event) =>
-                    setBodyProfile((previous) => ({
-                      ...previous,
-                      age: event.target.value ? Number(event.target.value) : null,
-                    }))
-                  }
+                  onChange={(event) => {
+                    const next = event.target.value === '' ? null : Number(event.target.value)
+                    setBodyProfile((previous) => ({ ...previous, age: Number.isFinite(next) ? next : null }))
+                  }}
+                  placeholder="28"
                 />
               </label>
             </div>
-            <button type="button" className="secondary-btn settings-apply-btn" onClick={applyBodyProfileSettings}>
-              分析へ反映する
-            </button>
+            <div className="settings-backup-actions">
+              <button type="button" className="secondary-btn settings-backup-btn" onClick={applyBodyProfileSettings}>
+                アプリへ反映する
+              </button>
+            </div>
           </div>
 
           <div className="settings-section">
             <label>
-              <strong>トレーニング目的</strong>
-              <p className="settings-hint">筋肥大とダイエットで、頻度・セット数・休憩・出典の見せ方を切り替えます。</p>
+              <strong>課金要素(仮)</strong>
+              <p className="settings-hint">将来の Pro 機能用の切り替えです。</p>
             </label>
-            <div className="settings-step-grid">
-              <label className="settings-step-row">
-                <span>目的</span>
-                <select
-                  value={trainingGoal}
-                  onChange={(event) => setTrainingGoal(normalizeTrainingGoal(event.target.value))}
-                >
-                  <option value="筋肥大">筋肥大</option>
-                  <option value="ダイエット">ダイエット</option>
-                </select>
-              </label>
+            <label className="settings-toggle-row">
+              <input
+                type="checkbox"
+                checked={isProUnlocked}
+                onChange={(event) => setIsProUnlocked(event.target.checked)}
+              />
+              Pro を解放する
+            </label>
+            <div className="settings-backup-actions">
+              <button type="button" className="secondary-btn settings-backup-btn" onClick={applyProSettings}>
+                アプリへ反映する
+              </button>
             </div>
-            <button type="button" className="secondary-btn settings-apply-btn" onClick={applyTrainingGoalSettings}>
-              目的を反映する
-            </button>
           </div>
 
-          <button type="button" onClick={logout}>
-            ログアウト
-          </button>
+          <div className="settings-section">
+            <label>
+              <strong>ホイールピッカー刻み幅</strong>
+              <p className="settings-hint">重量・回数・秒数のホイール刻みを調整します。</p>
+            </label>
+            <div className="settings-grid">
+              <label>
+                重量刻み
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  value={pickerStepSettings.weightStep}
+                  onChange={(event) => {
+                    const next = Number(event.target.value)
+                    setPickerStepSettings((previous) => ({
+                      ...previous,
+                      weightStep: Number.isFinite(next) && next >= 1 ? Math.round(next) : previous.weightStep,
+                    }))
+                  }}
+                />
+              </label>
+              <label>
+                回数刻み
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  value={pickerStepSettings.repStep}
+                  onChange={(event) => {
+                    const next = Number(event.target.value)
+                    setPickerStepSettings((previous) => ({
+                      ...previous,
+                      repStep: Number.isFinite(next) && next >= 1 ? Math.round(next) : previous.repStep,
+                    }))
+                  }}
+                />
+              </label>
+              <label>
+                秒数刻み
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  value={pickerStepSettings.durationStep}
+                  onChange={(event) => {
+                    const next = Number(event.target.value)
+                    setPickerStepSettings((previous) => ({
+                      ...previous,
+                      durationStep: Number.isFinite(next) && next >= 1 ? Math.round(next) : previous.durationStep,
+                    }))
+                  }}
+                />
+              </label>
+            </div>
+            <div className="settings-backup-actions">
+              <button type="button" className="secondary-btn settings-backup-btn" onClick={applyPickerStepSettings}>
+                アプリへ反映する
+              </button>
+            </div>
+          </div>
         </section>
       )}
 

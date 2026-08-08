@@ -49,6 +49,28 @@ type PendingSyncProgress = {
   remaining: number
 }
 
+type PendingSyncRetryOptions = {
+  force?: boolean
+  timeoutMs?: number
+}
+
+export type PendingSyncOverview = {
+  totalCount: number
+  blockedCount: number
+  sessions: {
+    pendingCount: number
+    blockedCount: number
+  }
+  customExercises: {
+    pendingCount: number
+    blockedCount: number
+  }
+  userSettings: {
+    pendingCount: number
+    blockedCount: number
+  }
+}
+
 export type UserSettingsPayload = {
   exerciseNotes: Record<string, string>
   exercisePreferences: Record<string, { restSeconds: number; metricType?: ExerciseMetricType }>
@@ -123,6 +145,45 @@ function writePendingSyncOps(operations: PendingSyncOperation[]) {
   }
 }
 
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => stripUndefinedDeep(item))
+      .filter((item) => item !== undefined) as T
+  }
+
+  if (value && typeof value === 'object') {
+    const result: Record<string, unknown> = {}
+    Object.entries(value as Record<string, unknown>).forEach(([key, nestedValue]) => {
+      if (nestedValue === undefined) {
+        return
+      }
+      result[key] = stripUndefinedDeep(nestedValue)
+    })
+    return result as T
+  }
+
+  return value
+}
+
+async function withSyncTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  let timeoutId: number | null = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(new Error('Firestore 同期が時間切れになりました'))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId)
+    }
+  }
+}
+
 function makePendingSyncId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -194,7 +255,7 @@ export function subscribeMyMenus(
 }
 
 export async function saveSession(db: Firestore, uid: string, session: WorkoutSession) {
-  await setDoc(doc(db, 'users', uid, 'sessions', session.id), session)
+  await setDoc(doc(db, 'users', uid, 'sessions', session.id), stripUndefinedDeep(session))
 }
 
 export async function removeSession(db: Firestore, uid: string, sessionId: string) {
@@ -202,7 +263,7 @@ export async function removeSession(db: Firestore, uid: string, sessionId: strin
 }
 
 export async function saveMyMenu(db: Firestore, uid: string, myMenu: MyMenu) {
-  await setDoc(doc(db, 'users', uid, 'myMenus', myMenu.id), myMenu)
+  await setDoc(doc(db, 'users', uid, 'myMenus', myMenu.id), stripUndefinedDeep(myMenu))
 }
 
 export async function removeMyMenu(db: Firestore, uid: string, menuId: string) {
@@ -225,7 +286,7 @@ export async function saveCustomExercises(
   uid: string,
   customExercisesByBodyPart: Record<BodyPart, string[]>,
 ) {
-  await setDoc(userLibraryDoc(db, uid), { customExercisesByBodyPart }, { merge: true })
+  await setDoc(userLibraryDoc(db, uid), stripUndefinedDeep({ customExercisesByBodyPart }), { merge: true })
 }
 
 export function subscribeUserSettings(
@@ -261,7 +322,7 @@ export function subscribeUserSettings(
 }
 
 export async function saveUserSettings(db: Firestore, uid: string, userSettings: UserSettingsPayload) {
-  await setDoc(userSettingsDoc(db, uid), userSettings, { merge: true })
+  await setDoc(userSettingsDoc(db, uid), stripUndefinedDeep(userSettings), { merge: true })
 }
 
 export function queueSessionSave(session: WorkoutSession) {
@@ -329,6 +390,78 @@ export function getPendingSessionSyncState() {
   return { savingIds, deletingIds }
 }
 
+export function getPendingSyncOverview() {
+  const pending = readPendingSyncOps()
+  const sessionPending = pending.filter((operation) => operation.type === 'saveSession' || operation.type === 'removeSession')
+  const customExercisesPending = pending.filter((operation) => operation.type === 'saveLibrary')
+  const userSettingsPending = pending.filter((operation) => operation.type === 'saveUserSettings')
+
+  return {
+    totalCount: pending.length,
+    blockedCount: pending.filter((operation) => operation.attempts >= MAX_PENDING_SYNC_ATTEMPTS).length,
+    sessions: {
+      pendingCount: sessionPending.length,
+      blockedCount: sessionPending.filter((operation) => operation.attempts >= MAX_PENDING_SYNC_ATTEMPTS).length,
+    },
+    customExercises: {
+      pendingCount: customExercisesPending.length,
+      blockedCount: customExercisesPending.filter((operation) => operation.attempts >= MAX_PENDING_SYNC_ATTEMPTS).length,
+    },
+    userSettings: {
+      pendingCount: userSettingsPending.length,
+      blockedCount: userSettingsPending.filter((operation) => operation.attempts >= MAX_PENDING_SYNC_ATTEMPTS).length,
+    },
+  }
+}
+
+export function prunePendingSessionSaveOps(activeSessionIds: string[]) {
+  const pending = readPendingSyncOps()
+  const activeSessionIdSet = new Set(activeSessionIds)
+  const nextPending = pending.filter((operation) => {
+    if (operation.type !== 'saveSession') {
+      return true
+    }
+
+    return activeSessionIdSet.has(operation.session.id)
+  })
+
+  if (nextPending.length !== pending.length) {
+    writePendingSyncOps(nextPending)
+  }
+}
+
+export function removePendingSessionSave(sessionId: string) {
+  const pending = readPendingSyncOps()
+  const nextPending = pending.filter((operation) => !(operation.type === 'saveSession' && operation.session.id === sessionId))
+  if (nextPending.length !== pending.length) {
+    writePendingSyncOps(nextPending)
+  }
+}
+
+export function removePendingSessionDelete(sessionId: string) {
+  const pending = readPendingSyncOps()
+  const nextPending = pending.filter((operation) => !(operation.type === 'removeSession' && operation.sessionId === sessionId))
+  if (nextPending.length !== pending.length) {
+    writePendingSyncOps(nextPending)
+  }
+}
+
+export function removePendingCustomExercisesSave() {
+  const pending = readPendingSyncOps()
+  const nextPending = pending.filter((operation) => operation.type !== 'saveLibrary')
+  if (nextPending.length !== pending.length) {
+    writePendingSyncOps(nextPending)
+  }
+}
+
+export function removePendingUserSettingsSave() {
+  const pending = readPendingSyncOps()
+  const nextPending = pending.filter((operation) => operation.type !== 'saveUserSettings')
+  if (nextPending.length !== pending.length) {
+    writePendingSyncOps(nextPending)
+  }
+}
+
 export function hasPendingCustomExercisesSave() {
   return readPendingSyncOps().some((operation) => operation.type === 'saveLibrary')
 }
@@ -337,11 +470,18 @@ export function hasPendingUserSettingsSave() {
   return readPendingSyncOps().some((operation) => operation.type === 'saveUserSettings')
 }
 
+export function clearPendingSyncOps() {
+  writePendingSyncOps([])
+}
+
 export async function flushPendingSyncOps(
   db: Firestore,
   uid: string,
   onProgress?: (state: PendingSyncProgress) => void,
+  options?: PendingSyncRetryOptions,
 ) {
+  const force = options?.force ?? false
+  const timeoutMs = options?.timeoutMs ?? 7000
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return [] as PendingSyncOperation[]
   }
@@ -355,21 +495,22 @@ export async function flushPendingSyncOps(
   let completedCount = 0
 
   for (const operation of pending) {
-    if (operation.attempts >= MAX_PENDING_SYNC_ATTEMPTS) {
+    if (!force && operation.attempts >= MAX_PENDING_SYNC_ATTEMPTS) {
       remaining.push(operation)
       continue
     }
 
     try {
-      if (operation.type === 'saveSession') {
-        await saveSession(db, uid, operation.session)
-      } else if (operation.type === 'removeSession') {
-        await removeSession(db, uid, operation.sessionId)
-      } else if (operation.type === 'saveUserSettings') {
-        await saveUserSettings(db, uid, operation.userSettings)
-      } else {
-        await saveCustomExercises(db, uid, operation.customExercisesByBodyPart)
-      }
+      const syncPromise =
+        operation.type === 'saveSession'
+          ? saveSession(db, uid, operation.session)
+          : operation.type === 'removeSession'
+            ? removeSession(db, uid, operation.sessionId)
+            : operation.type === 'saveUserSettings'
+              ? saveUserSettings(db, uid, operation.userSettings)
+              : saveCustomExercises(db, uid, operation.customExercisesByBodyPart)
+
+      await withSyncTimeout(syncPromise, timeoutMs)
       completedCount += 1
     } catch {
       const retriedOperation = {
