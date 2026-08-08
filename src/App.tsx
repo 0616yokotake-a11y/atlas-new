@@ -64,6 +64,10 @@ type ExerciseInputProfile = {
   durationMax: number
   durationStep: number
 }
+type RepresentativeExercise = {
+  name: string
+  metricType: ExerciseMetricType
+}
 const WHEEL_ITEM_HEIGHT = 54
 const WHEEL_VISIBLE_ROWS = 5
 const WHEEL_SIDE_PADDING = ((WHEEL_VISIBLE_ROWS - 1) / 2) * WHEEL_ITEM_HEIGHT
@@ -71,7 +75,38 @@ const EXERCISE_PREFERENCES_STORAGE_KEY = 'atlas.exercise-preferences.v1'
 const EXERCISE_NOTES_STORAGE_KEY = 'atlas.exercise-notes.v1'
 const CUSTOM_EXERCISES_STORAGE_KEY = 'atlas.custom-exercises.v1'
 const PRO_UNLOCKED_STORAGE_KEY = 'atlas.pro-unlocked.v1'
-const TIME_BASED_EXERCISES = new Set(['プランク', 'サイドプランク'])
+const REPRESENTATIVE_EXERCISES_BY_BODY_PART: Record<BodyPart, RepresentativeExercise[]> = {
+  胸: [
+    { name: 'ベンチプレス', metricType: 'reps' },
+    { name: 'インクラインベンチ', metricType: 'reps' },
+    { name: 'ダンベルプレス', metricType: 'reps' },
+  ],
+  背中: [
+    { name: 'ラットプルダウン', metricType: 'reps' },
+    { name: 'シーテッドロー', metricType: 'reps' },
+    { name: 'ワンハンドロー', metricType: 'reps' },
+  ],
+  肩: [
+    { name: 'ショルダープレス', metricType: 'reps' },
+    { name: 'サイドレイズ', metricType: 'reps' },
+    { name: 'リアレイズ', metricType: 'reps' },
+  ],
+  脚: [
+    { name: 'スクワット', metricType: 'reps' },
+    { name: 'レッグプレス', metricType: 'reps' },
+    { name: 'ルーマニアンデッドリフト', metricType: 'reps' },
+  ],
+  腕: [
+    { name: 'アームカール', metricType: 'reps' },
+    { name: 'トライセプスプレスダウン', metricType: 'reps' },
+    { name: 'ハンマーカール', metricType: 'reps' },
+  ],
+  腹筋: [
+    { name: 'クランチ', metricType: 'reps' },
+    { name: 'レッグレイズ', metricType: 'reps' },
+    { name: 'プランク', metricType: 'time' },
+  ],
+}
 let audioContextInstance: AudioContext | null = null
 
 function triggerHaptic(pattern: number | number[]) {
@@ -179,7 +214,14 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { hasError: bo
 }
 
 function getDefaultExerciseMetricType(exerciseName: string): ExerciseMetricType {
-  return TIME_BASED_EXERCISES.has(exerciseName) ? 'time' : 'reps'
+  for (const part of BODY_PARTS) {
+    const representative = REPRESENTATIVE_EXERCISES_BY_BODY_PART[part].find((exercise) => exercise.name === exerciseName)
+    if (representative) {
+      return representative.metricType
+    }
+  }
+
+  return exerciseName === 'プランク' || exerciseName === 'サイドプランク' ? 'time' : 'reps'
 }
 
 function getSetMetricValue(set: Pick<ExerciseSet, 'weight' | 'reps' | 'durationSec'>, metricType: ExerciseMetricType): number {
@@ -1164,7 +1206,7 @@ function AuthView({
 }
 
 function App() {
-  const { sessions, myMenus, setSessions, setMyMenus, addSession, deleteSession: deleteSessionFromStore } = useAtlasStore()
+  const { sessions, myMenus, setSessions, setMyMenus, addSession, updateSession, deleteSession: deleteSessionFromStore } = useAtlasStore()
   const [tab, setTab] = useState<AppTab>('home')
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1187,6 +1229,7 @@ function App() {
   const [analyticsWindowDays, setAnalyticsWindowDays] = useState<7 | 30>(7)
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState('')
   const [customExerciseInput, setCustomExerciseInput] = useState('')
+  const [customExerciseMetricType, setCustomExerciseMetricType] = useState<ExerciseMetricType>('reps')
   const [customExercisesByBodyPart, setCustomExercisesByBodyPart] = useState<
     Record<BodyPart, string[]>
   >(loadCustomExercisesByBodyPart)
@@ -1202,6 +1245,8 @@ function App() {
   const [exerciseInfoTarget, setExerciseInfoTarget] = useState<string | null>(null)
   const [exerciseRenameDraft, setExerciseRenameDraft] = useState('')
   const [isExerciseDeleteConfirming, setIsExerciseDeleteConfirming] = useState(false)
+  const [sessionDateDraft, setSessionDateDraft] = useState(() => dayjs().format('YYYY-MM-DD'))
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [pickerTarget, setPickerTarget] = useState<{ setId: string; key: PickerTargetKey } | null>(null)
   const [pickerValue, setPickerValue] = useState(0)
   const [isSavingWorkout, setIsSavingWorkout] = useState(false)
@@ -1287,11 +1332,6 @@ function App() {
 
     return () => window.clearInterval(timer)
   }, [timerRunning])
-
-  useEffect(() => {
-    setSelectedExercise('')
-    setExerciseSearchQuery('')
-  }, [selectedBodyPart])
 
   useEffect(() => {
     if (workoutPhase !== 'record') {
@@ -2058,9 +2098,31 @@ function App() {
     return stats
   }, [selectedBodyPart, sessions])
 
+  const representativeExercises = useMemo(
+    () => REPRESENTATIVE_EXERCISES_BY_BODY_PART[selectedBodyPart],
+    [selectedBodyPart],
+  )
+
+  const representativeExerciseMetricMap = useMemo(() => {
+    const map = new Map<string, ExerciseMetricType>()
+    representativeExercises.forEach((exercise) => {
+      map.set(exercise.name, exercise.metricType)
+    })
+    return map
+  }, [representativeExercises])
+
+  const filteredRepresentativeExercises = useMemo(() => {
+    const query = exerciseSearchQuery.trim()
+    if (!query) {
+      return representativeExercises
+    }
+
+    return representativeExercises.filter((exercise) => exercise.name.includes(query))
+  }, [exerciseSearchQuery, representativeExercises])
+
   const filteredExercises = useMemo(() => {
     const query = exerciseSearchQuery.trim()
-    // All exercises are user-created: combine library list + exercises found in history
+    // Custom exercises + history suggestions
     const allExercises = Array.from(
       new Set([
         ...customExercisesByBodyPart[selectedBodyPart],
@@ -2089,7 +2151,7 @@ function App() {
     }
 
     return sortedExercises.filter((exercise) => exercise.includes(query))
-  }, [customExercisesByBodyPart, exerciseSearchQuery, exerciseUsageStats, selectedBodyPart])
+  }, [customExercisesByBodyPart, exerciseSearchQuery, exerciseUsageStats, representativeExercises, selectedBodyPart])
 
   const bodyPartReadiness = useMemo(() => {
     const readinessMap = new Map<BodyPart, { label: string; tone: BodyPartBadgeTone }>()
@@ -2738,10 +2800,59 @@ function App() {
     resetCompleteConfirm()
   }
 
+  function setDraftDate(date: string) {
+    setSessionDateDraft(dayjs(date).format('YYYY-MM-DD'))
+  }
+
+  function startNewWorkoutDraft(date?: string) {
+    setEditingSessionId(null)
+    setDraftDate(date ?? dayjs().format('YYYY-MM-DD'))
+    setSelectedExercise('')
+    setSets([createSet(0), createSet(1), createSet(2)])
+    setCustomExerciseInput('')
+    setExerciseSearchQuery('')
+    setWorkoutPhase('body')
+    setTab('workout')
+    resetCompleteConfirm()
+  }
+
+  function startHistorySessionEdit(session: WorkoutSession) {
+    const primaryExercise = session.exercises[0]
+    if (!primaryExercise) {
+      return
+    }
+
+    setEditingSessionId(session.id)
+    setDraftDate(session.date)
+    setSelectedBodyPart(session.bodyPart)
+    setSelectedExercise(primaryExercise.name)
+    setCustomExerciseInput('')
+    setExerciseSearchQuery('')
+    setExercisePreferences((previous) => ({
+      ...previous,
+      [getExerciseDraftKey(session.bodyPart, primaryExercise.name)]: {
+        restSeconds: previous[getExerciseDraftKey(session.bodyPart, primaryExercise.name)]?.restSeconds
+          ?? getExerciseInputProfile(primaryExercise.name).defaultRestSeconds,
+        metricType: primaryExercise.metricType ?? getDefaultExerciseMetricType(primaryExercise.name),
+      },
+    }))
+    setSets(primaryExercise.sets.map((set) => ({ ...set })))
+    setRestSeconds(getExercisePreferredRestSeconds(session.bodyPart, primaryExercise.name))
+    setWorkoutPhase('record')
+    setTimerRunning(false)
+    setTab('workout')
+    resetCompleteConfirm()
+  }
+
   function handleCustomExerciseSubmit() {
     const name = customExerciseInput.trim()
     if (!name) {
       showToast('種目名を入力してください', 'error')
+      return
+    }
+
+    if (representativeExerciseMetricMap.has(name)) {
+      showToast('その名前は代表種目としてすでにあります', 'error')
       return
     }
 
@@ -2756,6 +2867,15 @@ function App() {
       }
     })
 
+    setExercisePreferences((previous) => ({
+      ...previous,
+      [getExerciseDraftKey(selectedBodyPart, name)]: {
+        restSeconds: previous[getExerciseDraftKey(selectedBodyPart, name)]?.restSeconds
+          ?? getExerciseInputProfile(name).defaultRestSeconds,
+        metricType: customExerciseMetricType,
+      },
+    }))
+
     handleExerciseSelect(name)
     showToast(`「${name}」を追加しました`)
     setCustomExerciseInput('')
@@ -2768,7 +2888,7 @@ function App() {
       return
     }
 
-    if (customExercisesByBodyPart[selectedBodyPart].includes(trimmed)) {
+    if (customExercisesByBodyPart[selectedBodyPart].includes(trimmed) || representativeExerciseMetricMap.has(trimmed)) {
       showToast('同じ名前の種目がすでにあります', 'error')
       return
     }
@@ -3015,9 +3135,12 @@ function App() {
     }
 
     vibrateAndSetTab('workout', 18)
+    setEditingSessionId(null)
+    setDraftDate(dayjs().format('YYYY-MM-DD'))
     setWorkoutPhase('body')
     setSets(createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType))
     setExerciseSearchQuery('')
+    setCustomExerciseInput('')
     resetCompleteConfirm()
   }
 
@@ -3077,13 +3200,24 @@ function App() {
 
     setIsSavingWorkout(true)
     try {
-      const session = createSession(selectedBodyPart, selectedExercise, selectedExerciseMetricType, sets)
-      addSession(session)
+      const baseSession = createSession(selectedBodyPart, selectedExercise, selectedExerciseMetricType, sets)
+      const session = {
+        ...baseSession,
+        id: editingSessionId ?? baseSession.id,
+        date: dayjs(sessionDateDraft).toISOString(),
+      }
+      if (editingSessionId) {
+        updateSession(session)
+      } else {
+        addSession(session)
+      }
       setTab('workout')
       setWorkoutPhase('body')
       setSets(createDefaultSetsForExercise(selectedExercise, selectedExerciseMetricType))
       setRestSeconds(getExercisePreferredRestSeconds(selectedBodyPart, selectedExercise))
       setTimerRunning(false)
+      setEditingSessionId(null)
+      setDraftDate(dayjs().format('YYYY-MM-DD'))
       showToast('保存しました')
       resetCompleteConfirm()
       setIsSavingWorkout(false)
@@ -3298,6 +3432,8 @@ function App() {
                     className={selectedBodyPart === part ? 'active' : ''}
                     onClick={() => {
                       setSelectedBodyPart(part)
+                      setSelectedExercise('')
+                      setExerciseSearchQuery('')
                       setWorkoutPhase('exercise')
                       triggerHaptic(30)
                     }}
@@ -3319,12 +3455,47 @@ function App() {
                 onChange={(event) => setExerciseSearchQuery(event.target.value)}
                 placeholder="種目を検索"
               />
+              <div className="representative-exercise-section">
+                <p className="exercise-edit-label">おすすめ代表種目</p>
+                <div className="representative-exercise-grid">
+                  {filteredRepresentativeExercises.map((exercise) => (
+                    <button
+                      key={exercise.name}
+                      type="button"
+                      className={`representative-exercise-chip ${selectedExercise === exercise.name ? 'active' : ''}`}
+                      onClick={() => {
+                        handleExerciseSelect(exercise.name)
+                        triggerHaptic(20)
+                      }}
+                    >
+                      <span>{exercise.name}</span>
+                      <small>{exercise.metricType === 'time' ? '秒固定' : '回数固定'}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="custom-exercise-row">
                 <input
                   value={customExerciseInput}
                   onChange={(event) => setCustomExerciseInput(event.target.value)}
                   placeholder="自由入力で種目追加（例: ケーブルリアレイズ）"
                 />
+                <div className="chip-row custom-metric-row">
+                  <button
+                    type="button"
+                    className={`chip-button ${customExerciseMetricType === 'reps' ? 'active' : ''}`}
+                    onClick={() => setCustomExerciseMetricType('reps')}
+                  >
+                    回数
+                  </button>
+                  <button
+                    type="button"
+                    className={`chip-button ${customExerciseMetricType === 'time' ? 'active' : ''}`}
+                    onClick={() => setCustomExerciseMetricType('time')}
+                  >
+                    秒数
+                  </button>
+                </div>
                 <button
                   type="button"
                   className="secondary-btn"
@@ -3361,6 +3532,11 @@ function App() {
                             })()
                           : '最高記録なし'}
                       </small>
+                      {representativeExerciseMetricMap.has(exercise) && (
+                        <small className="representative-badge">
+                          {representativeExerciseMetricMap.get(exercise) === 'time' ? '代表 / 秒固定' : '代表 / 回数固定'}
+                        </small>
+                      )}
                     </button>
                     <button
                       type="button"
@@ -3382,6 +3558,19 @@ function App() {
           {workoutPhase === 'record' && (
             <div className="step-panel record-step">
               <div className="record-step-body">
+                <div className="record-date-row">
+                  <label>
+                    記録日
+                    <input
+                      type="date"
+                      value={sessionDateDraft}
+                      onChange={(event) => setDraftDate(event.target.value)}
+                    />
+                  </label>
+                  <span className="record-date-hint">
+                    {editingSessionId ? '履歴編集モード' : 'あとから日付を直せます'}
+                  </span>
+                </div>
                 <div className="record-metric-pill">
                   <span className={`metric-fixed-badge ${selectedExerciseMetricType === 'time' ? 'time' : 'reps'}`}>
                     {selectedExerciseMetricType === 'time' ? '秒数固定' : '回数固定'}
@@ -3718,11 +3907,36 @@ function App() {
                     <span className={`history-toggle-icon ${isOpen ? 'open' : ''}`}>{isOpen ? '−' : '+'}</span>
                   </div>
                 </button>
+                <div className="history-date-actions">
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => {
+                      triggerHaptic(10)
+                      setHistorySelectedDate(section.date)
+                      setHistoryMonthCursor(section.date)
+                      setSelectedBodyPart(section.sessions[0]?.bodyPart ?? selectedBodyPart)
+                      startNewWorkoutDraft(section.date)
+                    }}
+                  >
+                    追記
+                  </button>
+                </div>
                 {isOpen &&
                   section.sessions.map((session) => (
                     <article key={session.id} className="history-item">
                       <div className="history-item-head">
                         <strong>{session.bodyPart}</strong>
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          onClick={() => {
+                            triggerHaptic(10)
+                            startHistorySessionEdit(session)
+                          }}
+                        >
+                          編集
+                        </button>
                         {isHistorySelectionMode && (
                           <button
                             type="button"
