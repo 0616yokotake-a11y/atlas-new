@@ -1830,13 +1830,13 @@ button.secondary-btn {
 
 .home-primary-card {
   border-color: rgba(125, 211, 252, 0.28);
-  gap: 6px;
+  gap: 5px;
 }
 
 .home-last-workout-card {
   border-color: rgba(167, 139, 250, 0.28);
   overflow: hidden;
-  padding-bottom: 7px;
+  padding-bottom: 6px;
 }
 
 .home-graph-card {
@@ -1865,20 +1865,20 @@ button.secondary-btn {
 .home-kpi-inline {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: 5px;
 }
 
 .kpi-chip {
   margin: 0;
-  padding: 8px 12px;
+  padding: 8px 10px;
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.5);
   border: 1px solid rgba(125, 211, 252, 0.18);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 52px;
+  gap: 8px;
+  min-height: 48px;
 }
 
 .kpi-chip .kpi-label {

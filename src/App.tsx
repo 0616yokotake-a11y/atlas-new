@@ -5008,9 +5008,6 @@ function App() {
             </div>
             {latestSessionSummary ? (
               <>
-                <p className="home-last-workout-meta">
-                  {latestSessionSummary.dateLabel} / {latestSessionSummary.bodyPart}
-                </p>
                 <div className="home-last-workout-kpi">
                   <p>
                     <span>種目</span>
