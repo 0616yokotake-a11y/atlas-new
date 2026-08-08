@@ -482,6 +482,10 @@ function roundToStep(value: number, step: number) {
   return Math.round(value / step) * step
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
 function getGoalPlan(goal: TrainingGoal) {
   if (goal === 'ダイエット') {
     return {
@@ -625,6 +629,105 @@ function getBodyGoalAlignment(profile: BodyProfile, goal: TrainingGoal) {
   }
 }
 
+function getPrescriptionStyle(exerciseName: string): 'compound' | 'machine' | 'isolation' | 'bodyweight' {
+  if (
+    [
+      'ベンチプレス',
+      'インクラインベンチ',
+      'ディクラインプレス',
+      'スミスマシンベンチ',
+      'ナローベンチプレス',
+      'バーベルロー',
+      'Tバーロー',
+      'デッドリフト',
+      'スクワット',
+      'ルーマニアンデッドリフト',
+      'ヒップスラスト',
+      'ハックスクワット',
+      'ショルダープレス',
+      'マシンショルダープレス',
+      'ラットプルダウン',
+      'ローイング',
+      'シーテッドロー',
+    ].includes(exerciseName)
+  ) {
+    return 'compound'
+  }
+
+  if (
+    [
+      'チェストプレス',
+      'レッグプレス',
+      'レッグカール',
+      'レッグエクステンション',
+      'トライセプスプレスダウン',
+      'ケーブルクランチ',
+      'フェイスプル',
+      'ケーブルフライ',
+      'ケーブルサイドレイズ',
+      'ストレートアームプルダウン',
+    ].includes(exerciseName)
+  ) {
+    return 'machine'
+  }
+
+  if (
+    [
+      'ダンベルプレス',
+      'ペックフライ',
+      'ケーブルフライ',
+      'ダンベルフライ',
+      'ワンハンドロー',
+      'プルオーバー',
+      'アーノルドプレス',
+      'サイドレイズ',
+      'リアレイズ',
+      'アップライトロー',
+      'フロントレイズ',
+      'シュラッグ',
+      'ブルガリアンスクワット',
+      'カーフレイズ',
+      'アームカール',
+      'ハンマーカール',
+      'フレンチプレス',
+      'プリーチャーカール',
+      'ケーブルカール',
+      'コンセントレーションカール',
+      'スカルクラッシャー',
+    ].includes(exerciseName)
+  ) {
+    return 'isolation'
+  }
+
+  return 'bodyweight'
+}
+
+function getPrescriptionTargets(exerciseName: string, goal: TrainingGoal) {
+  const style = getPrescriptionStyle(exerciseName)
+
+  if (style === 'compound') {
+    return goal === 'ダイエット'
+      ? { repMin: 5, repMax: 8, setFloor: 2, setCeiling: 4, restSeconds: 120, restShift: -15 }
+      : { repMin: 6, repMax: 9, setFloor: 3, setCeiling: 5, restSeconds: 150, restShift: 15 }
+  }
+
+  if (style === 'machine') {
+    return goal === 'ダイエット'
+      ? { repMin: 8, repMax: 12, setFloor: 2, setCeiling: 4, restSeconds: 90, restShift: -15 }
+      : { repMin: 8, repMax: 12, setFloor: 3, setCeiling: 5, restSeconds: 105, restShift: 0 }
+  }
+
+  if (style === 'isolation') {
+    return goal === 'ダイエット'
+      ? { repMin: 10, repMax: 15, setFloor: 2, setCeiling: 4, restSeconds: 60, restShift: -10 }
+      : { repMin: 10, repMax: 15, setFloor: 3, setCeiling: 5, restSeconds: 75, restShift: 0 }
+  }
+
+  return goal === 'ダイエット'
+    ? { repMin: 8, repMax: 15, setFloor: 2, setCeiling: 4, restSeconds: 60, restShift: -10 }
+    : { repMin: 8, repMax: 15, setFloor: 3, setCeiling: 5, restSeconds: 75, restShift: 0 }
+}
+
 function getAnchorExercise(session: WorkoutSession) {
   const exercise = [...session.exercises].sort((left, right) => {
     const leftMetricType = resolveExerciseMetricType(left)
@@ -690,6 +793,35 @@ function getNextBodyPartPrescription(
 
   const metricType = resolveExerciseMetricType(anchorExercise)
   const inputProfile = getExerciseInputProfile(anchorExercise.name)
+  const targetPlan = getPrescriptionTargets(anchorExercise.name, goal)
+  const recentExerciseSessions = sortedSessions
+    .map((session) => {
+      const exercise = session.exercises.find((item) => item.name === anchorExercise.name)
+      if (!exercise) {
+        return null
+      }
+
+      const exerciseMetricType = resolveExerciseMetricType(exercise)
+      const bestRecentSet = exercise.sets.reduce((best, set) => {
+        if (set.weight > best.weight) {
+          return set
+        }
+        if (set.weight === best.weight && getSetMetricValue(set, exerciseMetricType) > getSetMetricValue(best, exerciseMetricType)) {
+          return set
+        }
+        return best
+      }, exercise.sets[0] ?? createSet(0))
+
+      return {
+        metricType: exerciseMetricType,
+        metric: Math.max(1, getSetMetricValue(bestRecentSet, exerciseMetricType)),
+        weight: Math.max(0, bestRecentSet.weight || inputProfile.defaultWeight),
+        sets: Math.max(1, exercise.sets.length),
+      }
+    })
+    .filter((entry): entry is { metricType: ExerciseMetricType; metric: number; weight: number; sets: number } => entry !== null)
+    .slice(0, 3)
+
   const bestSet = anchorExercise.sets.reduce((best, set) => {
     if (set.weight > best.weight) {
       return set
@@ -704,67 +836,91 @@ function getNextBodyPartPrescription(
   const latestMetric = Math.max(1, getSetMetricValue(bestSet, metricType))
   const currentWeight = bestSet.weight > 0 ? bestSet.weight : inputProfile.defaultWeight
   const currentSets = Math.max(1, latestSetCount)
+  const recentMetrics = recentExerciseSessions.map((entry) => entry.metric)
+  const recentWeights = recentExerciseSessions.map((entry) => entry.weight)
+  const recentSetCounts = recentExerciseSessions.map((entry) => entry.sets)
+  const previousMetric = recentMetrics[1] ?? latestMetric
+  const metricTrend = latestMetric - previousMetric
+  const metricMomentum =
+   recentMetrics.length >= 3 ? latestMetric - recentMetrics[recentMetrics.length - 1] : metricTrend
+  const averageMetric =
+   recentMetrics.length > 0 ? Math.round(recentMetrics.reduce((sum, value) => sum + value, 0) / recentMetrics.length) : latestMetric
+  const averageWeight =
+   recentWeights.length > 0 ? roundToStep(recentWeights.reduce((sum, value) => sum + value, 0) / recentWeights.length, stepSettings.weightStep) : currentWeight
+  const averageSets = recentSetCounts.length > 0
+   ? recentSetCounts.reduce((sum, value) => sum + value, 0) / recentSetCounts.length
+   : currentSets
+  const targetSetsBase = Math.round((currentSets + averageSets) / 2) + bodyProfilePlan.setDelta
+  const setFloor = targetPlan.setFloor
+  const setCeiling = targetPlan.setCeiling
+  const restBase = targetPlan.restSeconds + bodyProfilePlan.restDelta + targetPlan.restShift
+  const conservativeTrend = metricMomentum <= 0 ? -1 : 0
 
   let nextWeight = currentWeight
   let nextReps = latestMetric
   let nextSets = currentSets
-  let restSeconds = goal === 'ダイエット' ? 90 : 120
-  const setFloor = goal === 'ダイエット' ? 2 : 3
-  const setCeiling = goal === 'ダイエット' ? 4 : 5
-  const adjustedDefaultSets = Math.max(setFloor, Math.min(setCeiling, currentSets + bodyProfilePlan.setDelta))
-  const restOffset = bodyProfilePlan.restDelta
+  let restSeconds = restBase
 
   if (metricType === 'time') {
-    const nextDuration = goal === 'ダイエット'
-      ? Math.max(inputProfile.defaultDurationSec, latestMetric)
-      : Math.min(inputProfile.durationMax, latestMetric + stepSettings.durationStep)
-    nextReps = nextDuration
-    nextSets = Math.max(setFloor, Math.min(setCeiling, goal === 'ダイエット' ? currentSets : currentSets + bodyProfilePlan.setDelta))
-    restSeconds = Math.max(60, (goal === 'ダイエット' ? 75 : 90) + restOffset)
-    return {
-      part,
-      exerciseName: anchorExercise.name,
-      weight: roundToStep(currentWeight, stepSettings.weightStep),
-      reps: nextReps,
-      sets: nextSets,
-      restSeconds,
-      detail:
-        goal === 'ダイエット'
-          ? `${goalPlan.summary} ${bodyProfilePlan.note} 同じ秒数を安定して押さえつつ、休憩を短めに整える。`
-          : `${goalPlan.summary} ${bodyProfilePlan.note} まずは秒数を少し伸ばしてから負荷更新へ。`,
-    }
+   const targetDuration = clamp(
+     latestMetric + (metricMomentum > 0 ? stepSettings.durationStep : 0),
+     inputProfile.durationMin,
+     inputProfile.durationMax,
+   )
+   nextReps = roundToStep(targetDuration, stepSettings.durationStep)
+   nextSets = Math.max(setFloor, Math.min(setCeiling, Math.round(targetSetsBase + (metricMomentum > 0 ? 1 : conservativeTrend))))
+   restSeconds = Math.max(45, restBase + (metricMomentum > 0 ? 10 : -10))
+   return {
+     part,
+     exerciseName: anchorExercise.name,
+     weight: roundToStep(currentWeight, stepSettings.weightStep),
+     reps: nextReps,
+     sets: nextSets,
+     restSeconds,
+     detail:
+       goal === 'ダイエット'
+         ? `${goalPlan.summary} ${bodyProfilePlan.note} 直近の秒数を基準に、安定維持を優先して次回値を出した。`
+         : `${goalPlan.summary} ${bodyProfilePlan.note} 直近の秒数と伸び方を見て、次回の目安を少し上向きに調整。`,
+   }
   }
 
+  const repBandLow = targetPlan.repMin
+  const repBandHigh = targetPlan.repMax
+  const readyToIncreaseWeight =
+   latestMetric >= repBandHigh || (latestMetric >= repBandHigh - 1 && metricTrend >= 0) || metricMomentum > stepSettings.repStep
+
   if (goal === 'ダイエット') {
-    nextWeight = roundToStep(currentWeight, stepSettings.weightStep)
-    nextReps = Math.max(inputProfile.repMin, Math.min(inputProfile.repMax, latestMetric))
-    nextSets = adjustedDefaultSets
-    restSeconds = Math.max(60, 90 + restOffset)
-  } else if (latestMetric >= Math.min(inputProfile.repMax, 10)) {
-    nextWeight = roundToStep(currentWeight + stepSettings.weightStep, stepSettings.weightStep)
-    nextReps = Math.max(inputProfile.repMin, Math.min(inputProfile.repMax, latestMetric - stepSettings.repStep))
-    nextSets = Math.min(setCeiling, currentSets + 1 + bodyProfilePlan.setDelta)
-    restSeconds = Math.max(90, inputProfile.defaultRestSeconds + restOffset)
+   nextWeight = roundToStep(currentWeight, stepSettings.weightStep)
+   nextReps = Math.max(repBandLow, Math.min(repBandHigh, Math.round((latestMetric + averageMetric) / 2)))
+   nextSets = Math.max(setFloor, Math.min(setCeiling, Math.round(targetSetsBase + (metricTrend > 0 ? 0 : -1))))
+   restSeconds = Math.max(45, restBase - 5)
+  } else if (readyToIncreaseWeight) {
+   const nextWeightValue = Math.max(currentWeight, averageWeight) + stepSettings.weightStep
+   nextWeight = roundToStep(nextWeightValue, stepSettings.weightStep)
+   nextReps = Math.max(repBandLow, Math.min(repBandHigh, Math.round((latestMetric + previousMetric) / 2)))
+   nextSets = Math.max(setFloor, Math.min(setCeiling, Math.round(targetSetsBase + 1 + (metricTrend > 0 ? 0 : -1))))
+   restSeconds = Math.max(75, restBase + 15)
   } else {
-    nextWeight = roundToStep(currentWeight, stepSettings.weightStep)
-    nextReps = Math.max(inputProfile.repMin, Math.min(inputProfile.repMax, latestMetric + stepSettings.repStep))
-    nextSets = Math.min(setCeiling, currentSets + (currentSets < 4 ? 1 : 0) + bodyProfilePlan.setDelta)
-    restSeconds = Math.max(90, inputProfile.defaultRestSeconds + restOffset)
+   const repIncrease = metricTrend < 0 ? stepSettings.repStep * 2 : stepSettings.repStep
+   nextWeight = roundToStep(Math.max(currentWeight, averageWeight), stepSettings.weightStep)
+   nextReps = Math.max(repBandLow, Math.min(repBandHigh, latestMetric + repIncrease))
+   nextSets = Math.max(setFloor, Math.min(setCeiling, Math.round(targetSetsBase + (metricTrend > 0 ? 1 : 0) + (metricMomentum < 0 ? -1 : 0))))
+   restSeconds = Math.max(60, restBase + (metricTrend > 0 ? 0 : -10))
   }
 
   return {
-    part,
-    exerciseName: anchorExercise.name,
-    weight: nextWeight,
-    reps: nextReps,
-    sets: nextSets,
-    restSeconds,
-    detail:
-      goal === 'ダイエット'
-        ? `${goalPlan.summary} ${bodyProfilePlan.label}の体格では、重量は維持・回数は安定・セットはやりすぎない。`
-        : latestMetric >= Math.min(inputProfile.repMax, 10)
-          ? `${bodyProfilePlan.label}の体格では回数の余裕が出たら重量更新。セットも1つ追加して伸びを作る。`
-          : `${bodyProfilePlan.label}の体格では、まず回数を押し上げてから重量更新へ進む。`,
+   part,
+   exerciseName: anchorExercise.name,
+   weight: nextWeight,
+   reps: nextReps,
+   sets: nextSets,
+   restSeconds,
+   detail:
+     goal === 'ダイエット'
+       ? `${goalPlan.summary} ${bodyProfilePlan.label}の体格では、直近の記録を平均化して無理のない維持ラインを出した。`
+       : readyToIncreaseWeight
+         ? `${bodyProfilePlan.label}の体格では、直近${recentExerciseSessions.length}回の伸びを見て重量更新を優先。`
+         : `${bodyProfilePlan.label}の体格では、直近${recentExerciseSessions.length}回の推移を見て回数先行で積み上げる。`,
   }
 }
 
