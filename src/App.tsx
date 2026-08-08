@@ -2744,7 +2744,8 @@ function App() {
   const historyCalendarDays = useMemo(() => {
     const start = historyMonth.startOf('month').startOf('week')
     const end = historyMonth.endOf('month').endOf('week')
-    const days: Array<{ key: string; dayLabel: string; isCurrentMonth: boolean; sessionCount: number }> = []
+    const todayKey = dayjs().format('YYYY-MM-DD')
+    const days: Array<{ key: string; dayLabel: string; isCurrentMonth: boolean; sessionCount: number; isToday: boolean }> = []
     let cursor = start
     while (cursor.isBefore(end) || cursor.isSame(end, 'day')) {
       const key = cursor.format('YYYY-MM-DD')
@@ -2753,6 +2754,7 @@ function App() {
         dayLabel: cursor.format('D'),
         isCurrentMonth: cursor.isSame(historyMonth, 'month'),
         sessionCount: historySessionsByDate.get(key)?.length ?? 0,
+        isToday: key === todayKey,
       })
       cursor = cursor.add(1, 'day')
     }
@@ -2770,6 +2772,17 @@ function App() {
       return dayjs(session.date).isSame(historyMonth, 'month')
     })
   }, [historyMonth, historySelectedDate, sessions])
+
+  const historyCalendarSummary = useMemo(() => {
+    const sessionCount = historyBaseFiltered.length
+    const activeDays = new Set(historyBaseFiltered.map((session) => dayjs(session.date).format('YYYY-MM-DD'))).size
+    const totalVolume = historyBaseFiltered.reduce((sum, session) => sum + getWorkoutSessionVolume(session), 0)
+    return {
+      sessionCount,
+      activeDays,
+      totalVolume,
+    }
+  }, [historyBaseFiltered])
 
   const historyBodyPartCounts = useMemo(() => {
     const counts = new Map<BodyPart, number>()
@@ -5313,10 +5326,36 @@ function App() {
               >
                 →
               </button>
+              <button
+              type="button"
+              className="history-calendar-today-btn"
+              onClick={() => {
+                triggerHaptic(10)
+                const today = dayjs().startOf('day').format('YYYY-MM-DD')
+                setHistoryMonthCursor(dayjs().startOf('month').format('YYYY-MM-DD'))
+                setHistorySelectedDate(today)
+              }}
+              >
+              今日
+              </button>
+            </div>
+            <div className="history-calendar-summary">
+              <div>
+              <span>件数</span>
+              <strong>{historyCalendarSummary.sessionCount}件</strong>
+              </div>
+              <div>
+              <span>実施日</span>
+              <strong>{historyCalendarSummary.activeDays}日</strong>
+              </div>
+              <div>
+              <span>総負荷</span>
+              <strong>{historyCalendarSummary.totalVolume.toLocaleString()}pt</strong>
+              </div>
             </div>
             <div className="history-calendar-weekdays">
               {['日', '月', '火', '水', '木', '金', '土'].map((weekday) => (
-                <span key={weekday}>{weekday}</span>
+              <span key={weekday}>{weekday}</span>
               ))}
             </div>
             <div className="history-calendar-grid">
@@ -5324,7 +5363,7 @@ function App() {
                 <button
                   key={day.key}
                   type="button"
-                  className={`history-calendar-day ${!day.isCurrentMonth ? 'other-month' : ''} ${day.sessionCount > 0 ? 'has-log' : ''} ${historySelectedDate === day.key ? 'active' : ''}`}
+                  className={`history-calendar-day ${!day.isCurrentMonth ? 'other-month' : ''} ${day.sessionCount > 0 ? 'has-log' : ''} ${day.isToday ? 'today' : ''} ${historySelectedDate === day.key ? 'active' : ''}`}
                   onClick={() => {
                     triggerHaptic(10)
                     if (!day.isCurrentMonth) {
@@ -5334,12 +5373,16 @@ function App() {
                   }}
                 >
                   <span>{day.dayLabel}</span>
-                  {day.sessionCount > 0 && <small>{day.sessionCount}</small>}
+                  <small>{day.isToday ? '今日' : day.sessionCount > 0 ? `${day.sessionCount}件` : '\u00A0'}</small>
                 </button>
               ))}
             </div>
             <div className="history-calendar-selection">
-              <p>{historySelectedDate ? `${dayjs(historySelectedDate).format('M/D')} の履歴` : '日付をタップでその日の詳細を表示'}</p>
+              <p>
+                {historySelectedDate
+                  ? `${dayjs(historySelectedDate).format('M/D')} の履歴（${historySessionsByDate.get(historySelectedDate)?.length ?? 0}件）`
+                  : '日付をタップでその日の詳細を表示'}
+              </p>
               {historySelectedDate && (
                 <div className="history-calendar-selection-actions">
                   <button
@@ -6530,7 +6573,8 @@ function App() {
     <div className="orientation-guard" aria-hidden="true">
       <section className="orientation-guard-card">
         <h1>縦向きでお使いください</h1>
-        <p>Atlas はスマホ縦画面専用です。端末を縦に戻すと、すぐ再開できます。</p>
+        <p>Atlas はスマホ縦画面専用です。</p>
+        <p>端末を縦に戻すと、すぐ再開できます。</p>
       </section>
     </div>
   )
