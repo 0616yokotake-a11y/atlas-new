@@ -1833,6 +1833,12 @@ button.secondary-btn {
   gap: 5px;
 }
 
+.home-primary-card .home-recommendation {
+  flex: 1 1 auto;
+  min-height: clamp(58px, 9vh, 76px);
+  padding-block: clamp(8px, 1vh, 12px);
+}
+
 .home-last-workout-card {
   border-color: rgba(167, 139, 250, 0.28);
   overflow: hidden;
@@ -1905,7 +1911,8 @@ button.secondary-btn {
 }
 
 .home-single-screen .thumb-workout-cta {
-  min-height: clamp(54px, 8.2vh, 66px);
+  min-height: clamp(58px, 8.8vh, 72px);
+  margin-top: clamp(0px, 0.35vh, 4px);
 }
 
 .workout-screen {
