@@ -1911,8 +1911,9 @@ button.secondary-btn {
 }
 
 .home-single-screen .thumb-workout-cta {
-  min-height: clamp(58px, 8.8vh, 72px);
-  margin-top: clamp(0px, 0.35vh, 4px);
+  min-height: clamp(58px, 9svh, 78px);
+  padding-block: clamp(10px, 1.1vh, 14px);
+  margin-top: clamp(0px, 0.25vh, 3px);
 }
 
 .workout-screen {
@@ -2989,7 +2990,7 @@ button.holding {
   }
 
   .thumb-workout-cta {
-    min-height: 60px;
+    min-height: 62px;
     font-size: 0.98rem;
   }
 
@@ -3034,7 +3035,7 @@ button.holding {
   }
 
   .thumb-workout-cta {
-    min-height: 56px;
+    min-height: 58px;
   }
 
   .home-kpi-inline { gap: 6px; }
