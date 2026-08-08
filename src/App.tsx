@@ -6526,7 +6526,16 @@ function App() {
     )
   }
 
-  return <AppErrorBoundary>{content}</AppErrorBoundary>
+  const orientationGuard = (
+    <div className="orientation-guard" aria-hidden="true">
+      <section className="orientation-guard-card">
+        <h1>縦向きでお使いください</h1>
+        <p>Atlas はスマホ縦画面専用です。端末を縦に戻すと、すぐ再開できます。</p>
+      </section>
+    </div>
+  )
+
+  return <AppErrorBoundary>{orientationGuard}{content}</AppErrorBoundary>
 }
 
 export default App
